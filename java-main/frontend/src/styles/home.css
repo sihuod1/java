@@ -1,0 +1,149 @@
+/* ===== 主页 / 个人中心 共用样式 ===== */
+
+/* 主卡片（比登录卡片宽一些） */
+.card.wide {
+  width: 460px;
+}
+
+/* 顶部：头像 + 昵称 + 账号 */
+.user-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  font-size: 26px;
+  font-weight: 700;
+  color: #3a2a06;
+  background: linear-gradient(180deg, var(--gold-1), var(--gold-2) 60%, var(--gold-3));
+  box-shadow: 0 6px 20px rgba(247, 215, 116, 0.35);
+}
+
+.user-head .who {
+  flex: 1;
+  min-width: 0;
+}
+
+.user-head .who h2 {
+  font-size: 20px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-head .who p {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 1px;
+}
+
+/* 信息条目 */
+.info-list {
+  border-radius: 14px;
+  border: 1px solid rgba(247, 215, 116, 0.18);
+  background: rgba(8, 11, 28, 0.45);
+  padding: 6px 16px;
+  margin-bottom: 22px;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 11px 0;
+  font-size: 13px;
+}
+
+.info-row + .info-row {
+  border-top: 1px dashed rgba(247, 215, 116, 0.14);
+}
+
+.info-row .label {
+  color: var(--muted);
+}
+
+.info-row .value {
+  color: var(--ink);
+}
+
+/* 按钮（次要、描边风格） */
+.btn-ghost {
+  width: 100%;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(247, 215, 116, 0.4);
+  background: transparent;
+  color: var(--gold-1);
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.12s;
+}
+
+.btn-ghost:hover {
+  border-color: var(--gold-1);
+  box-shadow: 0 4px 18px rgba(247, 215, 116, 0.2);
+}
+
+.btn-ghost:active {
+  transform: translateY(1px);
+}
+
+/* 底部动作区（两个按钮并排） */
+.actions {
+  display: flex;
+  gap: 12px;
+}
+
+.actions .btn {
+  flex: 1;
+  letter-spacing: 2px;
+  padding: 12px;
+  font-size: 14px;
+}
+
+/* 分区标题 */
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 20px 0 14px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--gold-1);
+  letter-spacing: 2px;
+}
+
+.section-title::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(247, 215, 116, 0.4), transparent);
+}
+
+/* 顶部导航条（个人中心返回主页） */
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  font-size: 13px;
+}
+
+.topbar a {
+  color: var(--gold-1);
+  text-decoration: none;
+}
+
+.topbar a:hover {
+  text-decoration: underline;
+}

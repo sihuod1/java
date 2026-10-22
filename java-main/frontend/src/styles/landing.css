@@ -1,0 +1,8 @@
+/* ===== 首页（Landing）样式 =====
+ *
+ * 2026-10-19 重构：首页样式已全部迁入 views/LandingView.vue 的 <style scoped>，
+ * 不再用全局类名（旧的 .nav / .hero / .feature 会污染登录、注册等页面）。
+ * 本文件保留只是因为 main.js 仍 import 它，避免构建报错；如不再需要可直接删 import。
+ *
+ * 全局主题变量（--gold-1 / --bg-deep / --ink / --muted 等）见 styles/global.css。
+ */
