@@ -109,7 +109,7 @@ function goHome() {
 </script>
 
 <template>
-  <div class="card wide">
+  <div class="auth-card wide">
     <div class="topbar">
       <a href="#/home" @click.prevent="goHome">← 返回主页</a>
       <span style="color: var(--muted)">GOLDEN SPATULA</span>

@@ -3,21 +3,103 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, clearLogin, getSavedUser } from '../utils/auth'
 import {
-  HEROES,
-  ITEMS,
-  TRAITS,
+  HEROES as STATIC_HEROES,
+  ITEMS as STATIC_ITEMS,
+  TRAITS as STATIC_TRAITS,
   COST_COLOR,
   COST_LABEL,
   STAT_MAX,
-  STAT_LABEL,
-  heroesOfTrait,
-  itemsFromBase
+  STAT_LABEL
 } from '../data/codex'
 import ItemIcon from '../components/ItemIcon.vue'
 import TraitIcon from '../components/TraitIcon.vue'
 import { heroAvatar, heroSplash } from '../data/heroAvatars'
 
 const router = useRouter()
+
+/* ---------------- 图鉴数据 ----------------
+ * 数据源：后端 /api/codex/*（由后台管理系统维护）
+ * 拉取失败时回退到 codex.js 静态数据，保证页面始终可用 */
+const heroes = ref(STATIC_HEROES)
+const items = ref(STATIC_ITEMS)
+const traits = ref(STATIC_TRAITS)
+
+/** 安全解析后端 JSON 列字符串 */
+function parseJsonCol(s, fallback) {
+  if (s == null || s === '') return fallback
+  try {
+    const v = JSON.parse(s)
+    return v == null ? fallback : v
+  } catch (e) {
+    return fallback
+  }
+}
+
+function heroFromApi(r) {
+  return {
+    id: r.id,
+    name: r.name,
+    en: r.en || '',
+    cost: r.cost,
+    traits: parseJsonCol(r.traits, []),
+    role: r.role || '',
+    tagline: r.tagline || '',
+    skill: { name: r.skillName || '', desc: r.skillDesc || '' },
+    stats: parseJsonCol(r.stats, {}),
+    items: parseJsonCol(r.items, []),
+    tip: r.tip || ''
+  }
+}
+
+function itemFromApi(r) {
+  return {
+    id: r.id,
+    name: r.name,
+    type: r.type,
+    recipe: parseJsonCol(r.recipe, null),
+    stats: r.stats || '',
+    desc: r.desc || '',
+    for: parseJsonCol(r.forHeroes, [])
+  }
+}
+
+function traitFromApi(r) {
+  return {
+    id: r.id,
+    name: r.name,
+    type: r.type,
+    icon: r.icon || '',
+    tiers: parseJsonCol(r.tiers, []),
+    tip: r.tip || ''
+  }
+}
+
+async function loadCodex() {
+  try {
+    const [h, i, t] = await Promise.all([
+      api('/api/codex/heroes'),
+      api('/api/codex/items'),
+      api('/api/codex/traits')
+    ])
+    if (Array.isArray(h) && h.length) heroes.value = h.map(heroFromApi)
+    if (Array.isArray(i) && i.length) items.value = i.map(itemFromApi)
+    if (Array.isArray(t) && t.length) traits.value = t.map(traitFromApi)
+  } catch (e) {
+    /* 后端不可用：保持 codex.js 静态数据兜底 */
+  }
+}
+
+/** 拥有某羁绊的英雄列表 */
+function heroesOfTrait(traitName) {
+  return heroes.value.filter((h) => h.traits.includes(traitName))
+}
+
+/** 由基础散件可合成的装备名列表 */
+function itemsFromBase(baseName) {
+  return items.value
+    .filter((it) => it.recipe && it.recipe.includes(baseName))
+    .map((it) => it.name)
+}
 
 /* ---------------- 登录态与用户信息 ---------------- */
 const profile = ref({
@@ -29,6 +111,7 @@ const loading = ref(true)
 const error = ref('')
 
 onMounted(async () => {
+  loadCodex() // 图鉴数据异步拉取，不阻塞页面
   try {
     profile.value = await api('/api/me')
   } catch (e) {
@@ -46,6 +129,11 @@ async function onLogout() {
 
 function goProfile() {
   router.push({ name: 'profile' })
+}
+
+/* 进后台管理系统（图鉴数据管理）；未登录后台会先落到后台登录页 */
+function goAdmin() {
+  router.push({ name: 'adminLogin' })
 }
 
 function avatarText(name) {
@@ -77,7 +165,7 @@ const traitKind = ref('all') // all | 职业 | 种族
 const traitKw = ref('')
 
 const heroList = computed(() =>
-  HEROES.filter((h) => {
+  heroes.value.filter((h) => {
     if (heroCost.value !== 'all' && h.cost !== Number(heroCost.value)) return false
     if (heroTrait.value !== 'all' && !h.traits.includes(heroTrait.value)) return false
     const kw = heroKw.value.trim().toLowerCase()
@@ -87,7 +175,7 @@ const heroList = computed(() =>
 )
 
 const itemList = computed(() =>
-  ITEMS.filter((it) => {
+  items.value.filter((it) => {
     if (itemKind.value !== 'all' && it.type !== itemKind.value) return false
     const kw = itemKw.value.trim()
     if (kw && !it.name.includes(kw)) return false
@@ -96,7 +184,7 @@ const itemList = computed(() =>
 )
 
 const traitList = computed(() =>
-  TRAITS.filter((t) => {
+  traits.value.filter((t) => {
     if (traitKind.value !== 'all' && t.type !== traitKind.value) return false
     const kw = traitKw.value.trim()
     if (kw && !t.name.includes(kw)) return false
@@ -216,7 +304,7 @@ function statPct(key, value) {
 
 /** 按装备名查装备对象（推荐装备、合成路径回显用） */
 function findItem(name) {
-  return ITEMS.find((it) => it.name === name)
+  return items.value.find((it) => it.name === name)
 }
 
 function openItemByName(name) {
@@ -225,12 +313,12 @@ function openItemByName(name) {
 }
 
 function openHeroByName(name) {
-  const h = HEROES.find((x) => x.name === name)
+  const h = heroes.value.find((x) => x.name === name)
   if (h) detail.value = { kind: 'hero', data: h }
 }
 
 function openTraitByName(name) {
-  const t = TRAITS.find((x) => x.name === name)
+  const t = traits.value.find((x) => x.name === name)
   if (t) detail.value = { kind: 'trait', data: t }
 }
 </script>
@@ -269,6 +357,7 @@ function openTraitByName(name) {
 
       <div class="acts">
         <button class="btn-ghost" @click="goProfile">个人中心</button>
+        <button class="btn-admin" @click="goAdmin">后台管理</button>
         <button class="btn-quit" @click="onLogout">退出登录</button>
       </div>
     </header>
@@ -276,13 +365,13 @@ function openTraitByName(name) {
     <!-- ===== Tab：英雄 / 装备 / 羁绊 ===== -->
     <nav class="tabs">
       <button :class="{ on: tab === 'hero' }" @click="tab = 'hero'">
-        英雄图鉴 <i>{{ HEROES.length }}</i>
+        英雄图鉴 <i>{{ heroes.length }}</i>
       </button>
       <button :class="{ on: tab === 'item' }" @click="tab = 'item'">
-        装备图鉴 <i>{{ ITEMS.length }}</i>
+        装备图鉴 <i>{{ items.length }}</i>
       </button>
       <button :class="{ on: tab === 'trait' }" @click="tab = 'trait'">
-        羁绊图鉴 <i>{{ TRAITS.length }}</i>
+        羁绊图鉴 <i>{{ traits.length }}</i>
       </button>
     </nav>
 
@@ -304,7 +393,7 @@ function openTraitByName(name) {
         </div>
         <select v-model="heroTrait" class="select">
           <option value="all">全部羁绊</option>
-          <option v-for="t in TRAITS" :key="t.name" :value="t.name">{{ t.name }}</option>
+          <option v-for="t in traits" :key="t.name" :value="t.name">{{ t.name }}</option>
         </select>
       </div>
 
@@ -674,6 +763,7 @@ function openTraitByName(name) {
 }
 
 .btn-ghost,
+.btn-admin,
 .btn-quit {
   padding: 9px 18px;
   border-radius: 10px;
@@ -692,6 +782,19 @@ function openTraitByName(name) {
 .btn-ghost:hover {
   border-color: var(--gold-1);
   background: rgba(247, 215, 116, 0.1);
+}
+
+/* 后台管理按钮：金色实心，区别于普通操作 */
+.btn-admin {
+  color: #3a2a06;
+  background: linear-gradient(180deg, var(--gold-1), var(--gold-2) 55%, var(--gold-3));
+  border: 1px solid transparent;
+  box-shadow: 0 6px 18px rgba(247, 215, 116, 0.25);
+}
+
+.btn-admin:hover {
+  filter: brightness(1.08);
+  box-shadow: 0 8px 24px rgba(247, 215, 116, 0.4);
 }
 
 .btn-quit {

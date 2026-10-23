@@ -60,4 +60,33 @@ public class TokenService {
     public void invalidateUser(Long userId) {
         tokens.entrySet().removeIf(e -> userId.equals(e.getValue().userId));
     }
+
+    /* ============================================================
+     * 管理员 token（与前台用户 token 分开存储，互不通用）
+     * ============================================================ */
+
+    private final Map<String, Long> adminTokens = new ConcurrentHashMap<>();
+
+    /** 为管理员创建 token（加 admin 前缀便于排查） */
+    public String createAdminToken(Long adminId) {
+        String token = "admin-" + java.util.UUID.randomUUID().toString().replace("-", "");
+        adminTokens.put(token, adminId);
+        return token;
+    }
+
+    /** 解析管理员 token，无效返回 null */
+    public Long getAdminId(String token) {
+        if (token == null || !token.startsWith("admin-")) {
+            return null;
+        }
+        // 管理员 token 不设过期：退出登录 / 重启后端即失效
+        return adminTokens.get(token);
+    }
+
+    /** 注销管理员 token */
+    public void removeAdmin(String token) {
+        if (token != null) {
+            adminTokens.remove(token);
+        }
+    }
 }

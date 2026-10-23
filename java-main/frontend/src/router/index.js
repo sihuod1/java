@@ -1,10 +1,13 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { isLoggedIn } from '../utils/auth'
+import { isAdminLoggedIn } from '../utils/adminAuth'
 import LandingView from '../views/LandingView.vue'
 import LoginView from '../views/LoginView.vue'
 import RegisterView from '../views/RegisterView.vue'
 import HomeView from '../views/HomeView.vue'
 import ProfileView from '../views/ProfileView.vue'
+import AdminLoginView from '../views/AdminLoginView.vue'
+import AdminView from '../views/AdminView.vue'
 
 const routes = [
   // 首页（门面页，登录与否都可见）
@@ -33,6 +36,20 @@ const routes = [
     component: ProfileView,
     meta: { title: '个人中心', requiresAuth: true }
   },
+  // 后台管理系统：登录页（仅登录，无注册入口）
+  {
+    path: '/admin/login',
+    name: 'adminLogin',
+    component: AdminLoginView,
+    meta: { title: '后台登录' }
+  },
+  // 后台管理系统：图鉴数据管理（需管理员登录态）
+  {
+    path: '/admin',
+    name: 'admin',
+    component: AdminView,
+    meta: { title: '后台管理', requiresAdmin: true }
+  },
   // 兜底：未知地址回到首页
   { path: '/:pathMatch(.*)*', redirect: '/' }
 ]
@@ -47,6 +64,10 @@ const router = createRouter({
 router.beforeEach((to) => {
   if (to.meta.requiresAuth && !isLoggedIn()) {
     return { name: 'login', query: { redirect: to.fullPath } }
+  }
+  // 后台页面：没有管理员登录态就去后台登录页
+  if (to.meta.requiresAdmin && !isAdminLoggedIn()) {
+    return { name: 'adminLogin' }
   }
 })
 

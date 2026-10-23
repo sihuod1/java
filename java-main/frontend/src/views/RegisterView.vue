@@ -111,7 +111,7 @@ async function onRegister() {
 </script>
 
 <template>
-  <div class="card">
+  <div class="auth-card">
     <div class="logo">
       <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
         <defs>

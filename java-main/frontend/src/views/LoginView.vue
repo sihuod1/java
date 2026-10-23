@@ -92,7 +92,7 @@ async function onLogin() {
 </script>
 
 <template>
-  <div class="card">
+  <div class="auth-card">
     <div class="logo">
       <!-- 金色铲铲图标 -->
       <svg width="72" height="72" viewBox="0 0 64 64" fill="none">

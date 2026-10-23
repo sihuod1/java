@@ -1,6 +1,9 @@
 /* ===== 登录 / 注册 共用样式（金色卡片风格） ===== */
 
-.card {
+/* 注意：这里用 .auth-card 而不是 .card。
+   之前的 .card 是全局类名，会把登录框的 width:380px 强加给
+   主页图鉴卡片（185px 网格轨道）和落地页玩法卡片，导致它们互相叠在一起。 */
+.auth-card {
   position: relative;
   width: 380px;
   max-width: 92vw;
@@ -16,7 +19,7 @@
   z-index: 2;
 }
 
-.card::before {
+.auth-card::before {
   content: "";
   position: absolute;
   inset: -1px;
