@@ -17,6 +17,14 @@ const splashes = import.meta.glob('../assets/heroes-splash/*.jpg', {
   import: 'default'
 })
 
+// 2K 立绘（由 scripts/upscale-splash-2k.py 从原画高质量重采样到 2560 宽）
+// 用于点击头像放大展示：Riot 官方公开素材最大只到 1280x720，直接放大会发虚，
+// 因此统一走 2K 版本。
+const splashes2k = import.meta.glob('../assets/heroes-splash-2k/*.jpg', {
+  eager: true,
+  import: 'default'
+})
+
 // 英文名 -> 已解析的图片 URL
 const byEn = {}
 for (const [path, url] of Object.entries(images)) {
@@ -27,6 +35,11 @@ const splashByEn = {}
 for (const [path, url] of Object.entries(splashes)) {
   const file = path.split('/').pop().replace(/\.jpg$/, '')
   splashByEn[file.toLowerCase()] = url
+}
+const splash2kByEn = {}
+for (const [path, url] of Object.entries(splashes2k)) {
+  const file = path.split('/').pop().replace(/\.jpg$/, '')
+  splash2kByEn[file.toLowerCase()] = url
 }
 
 // 中文名 -> 图片 URL（en 字段与文件名对应规则：去空格、去撇号）
@@ -61,7 +74,7 @@ export function heroAvatar(name) {
   return HERO_AVATARS[name] || null
 }
 
-// 取高清立绘（放大展示用），没有则回退到小头像
+// 取高清立绘（放大展示用）：优先 2K，其次原画，最后回退到小头像
 export function heroSplash(name) {
   const enMap = {
     盖伦: 'garen', 薇恩: 'vayne', 格雷福斯: 'graves', 卡萨丁: 'kassadin',
@@ -71,5 +84,5 @@ export function heroSplash(name) {
     奥拉夫: 'olaf', 艾尼维亚: 'anivia', 凯隐: 'kayn', 厄加特: 'urgot',
     李青: 'leesin', 悠米: 'yuumi'
   }
-  return splashByEn[enMap[name]] || HERO_AVATARS[name] || null
+  return splash2kByEn[enMap[name]] || splashByEn[enMap[name]] || HERO_AVATARS[name] || null
 }

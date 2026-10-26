@@ -6,19 +6,18 @@ import com.fenglin.springboottest.dto.RegisterRequest;
 import com.fenglin.springboottest.entity.User;
 import com.fenglin.springboottest.mapper.UserMapper;
 import com.fenglin.springboottest.service.UserService;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 
 /**
  * 用户业务实现
+ *
+ * 密码策略：明文存储 / 明文比对（演示项目要求，不做哈希加密）
+ * 权限策略：注册用户默认 perm = 1（普通用户），仅 perm = 0 可登录后台管理系统
  */
 @Service
 public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements UserService {
-
-    /** BCrypt 密码加密器 */
-    private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     @Override
     public void register(RegisterRequest req) {
@@ -45,12 +44,13 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             throw new BizException(409, "该账号已被注册，换一个吧～");
         }
 
-        // 3. 组装并加密落库
+        // 3. 组装落库：密码明文保存，权限默认「普通用户」
         User user = new User();
         user.setUsername(username);
-        user.setPassword(passwordEncoder.encode(req.getPassword()));
+        user.setPassword(req.getPassword());
         user.setNickName(username);
         user.setStatus(1);
+        user.setPerm(User.PERM_USER);
         user.setCreateTime(LocalDateTime.now());
         user.setUpdateTime(LocalDateTime.now());
 
@@ -66,7 +66,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         User user = this.lambdaQuery()
                 .eq(User::getUsername, username.trim())
                 .one();
-        if (user == null || !passwordEncoder.matches(password, user.getPassword())) {
+        // 明文比对
+        if (user == null || !password.equals(user.getPassword())) {
             throw new BizException(401, "账号或密码错误");
         }
         if (user.getStatus() != null && user.getStatus() == 0) {
@@ -102,10 +103,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         if (user == null) {
             throw new BizException(401, "登录已过期，请重新登录");
         }
-        if (!passwordEncoder.matches(oldPassword, user.getPassword())) {
+        if (!oldPassword.equals(user.getPassword())) {
             throw new BizException(400, "原密码不正确");
         }
-        user.setPassword(passwordEncoder.encode(newPassword));
+        user.setPassword(newPassword);
         user.setUpdateTime(LocalDateTime.now());
         this.updateById(user);
     }

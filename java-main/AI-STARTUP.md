@@ -28,9 +28,10 @@
 
 - **不存在** `java-main/backend/` 目录，**不存在** 8082 旧版后端，**不要去找、不要再启 8082**。
 - 页面：`/` 首页（Landing，登录态判断）→ `/login` 登录 → `/home` 主页（需登录）→ `/profile` 个人中心（需登录）
-- **后台管理系统**：`/admin/login` 管理员登录（仅登录无注册）→ `/admin` 图鉴数据管理（英雄/装备/羁绊 CRUD，改完首页同步生效）。管理员 `admin / admin123`（表 `sys_admin`，不走注册）
+- **后台管理系统**：`/admin/login` 管理员登录（仅登录无注册）→ `/admin` 图鉴数据管理（英雄/装备/羁绊 CRUD，改完首页同步生效）。管理员 `admin / admin123`（**复用 `sys_user`，靠 `perm = 0` 区分**，不走注册）；普通权限账号看不到入口、也登不进
 - 数据库：MySQL 8 本机 3306，账号 `root / 123456`，库名 `springboottest`
-- 测试账号：`testuser01 / xyz789`（库为空时用注册接口重建，见 2.4）
+- 测试账号：`testuser01 / 123456`（2026-10-26 起密码改明文，历史账号统一重置为此值；库为空时用注册接口重建，见 2.4）
+- ⚠️ `sys_user.password` **明文存储、不做加密**（用户明确要求），详见第十节
 - ⚠️ Windows mysql 客户端导入含中文的 SQL **必须加 `--default-character-set=utf8mb4`**，否则报「Data too long」或中文乱码
 
 ## 二、启动步骤（按顺序执行）
@@ -80,9 +81,9 @@ curl -s --noproxy "*" -o /dev/null -w "后端 %{http_code}\n" http://localhost:8
 ```
 补测试账号（已存在会报错，忽略即可）：
 ```bash
-curl -s --noproxy "*" -X POST http://localhost:8081/api/register -H "Content-Type: application/json" -d '{"username":"testuser01","password":"xyz789"}'
-curl -s --noproxy "*" -X POST http://localhost:8081/api/login    -H "Content-Type: application/json" -d '{"username":"testuser01","password":"xyz789"}'
-# 期望登录取到 {"code":0,"data":{"token":"..."}}
+curl -s --noproxy "*" -X POST http://localhost:8081/api/register -H "Content-Type: application/json" -d '{"username":"testuser01","password":"123456"}'
+curl -s --noproxy "*" -X POST http://localhost:8081/api/login    -H "Content-Type: application/json" -d '{"username":"testuser01","password":"123456"}'
+# 期望登录取到 {"code":0,"data":{"token":"...","perm":1}}
 ```
 
 ## 三、关键坑（务必避开）
@@ -135,15 +136,61 @@ cd "D:/workSpace/java/java-main" && tar --force-local --exclude='node_modules' -
 | 项 | 说明 |
 |---|---|
 | 入口 | 首页导航栏「后台管理」按钮 → `/#/admin/login` |
-| 账号 | `admin / admin123`（表 `sys_admin`，BCrypt；管理员不走注册） |
+| 账号 | `admin / admin123`（复用 `sys_user`，`perm = 0` 即管理员；密码明文，不走注册） |
 | 前端页面 | `AdminLoginView.vue`（仅登录）、`AdminView.vue`（三个 tab 表格 + 弹窗表单 CRUD） |
 | token | 独立存储（`spatula_admin_token`，admin- 前缀），与前台用户 token 互不通用 |
 | 鉴权 | `AdminInterceptor` 拦截 `/api/admin/**`（放行 `/api/admin/login`） |
 | 公开接口 | `GET /api/codex/heroes\|items\|traits`（首页数据源，无需登录） |
 | 管理接口 | `/api/admin/heroes\|items\|traits` 的 GET / POST / PUT / DELETE + login/me/logout |
-| 数据表 | `codex_hero` / `codex_item` / `codex_trait` / `sys_admin`，JSON 列存字符串，前端 parse |
+| 数据表 | `codex_hero` / `codex_item` / `codex_trait`；管理员账号存在 `sys_user`（`perm = 0`），废弃的 `sys_admin` 不再参与登录校验 |
 | 兜底 | 首页拉取 `/api/codex/*` 失败时回退 `codex.js` 静态数据，页面不空白 |
 | 种子 | `sql/admin-init.sql`（建表）+ `sql/codex-seed.sql`（数据，由 codex.js 生成） |
 
 ⚠️ 已知坑：MySQL 列名 `desc` / `for` 是关键字，MyBatis-Plus 实体必须写
 `@TableField("`desc`")`、`@TableField("`for`")`（带反引号），否则 SELECT 报 SQL 语法错误。
+
+## 九、头像放大查看（2026-10-26 新增）
+
+行为规则（用户明确要求）：
+
+| 操作 | 结果 |
+|---|---|
+| 点任意一个头像 | 2K 立绘从头像位置 FLIP 放大，**宽 50vw、高度按原图比例**（原会拉伸成 50vw×100vh 竖条，已修） |
+| 再点页面上任意一处 / 按 ESC | 原路缩回到头像位置并退出 |
+| 点头像以外的卡片区域 | 仍然打开详情弹窗（两个交互互相独立） |
+
+- 生效位置：`HomeView.vue` 的英雄卡 `.face`、详情弹窗里的 `.m-face`
+- 实现：`openZoom / closeZoom / zoomBox`（FLIP + `phase: prepare|in|out`），悬停卡片时 `warmHero()` 预加载 2K 图
+- **2K 素材**：`frontend/src/assets/heroes-splash-2k/`（2560×1440，23 张共 8.9 MB）
+- ⚠️ Riot 公开素材上限只有 1280×720 / 1215×717（CommunityDragon、Data Dragon 都验证过），
+  放大会发虚。**没有现成 2K 源**，只能本地重采样：
+  ```bash
+  "C:/Users/Administrator/.workbuddy/binaries/python/envs/default/Scripts/python.exe" scripts/upscale-splash-2k.py   # --force 强制重建
+  ```
+  （依赖 Pillow，装在 envs/default 虚拟环境里）
+- `heroSplash()` 取值顺序：2K → 原画 → 小头像，缺图自动回退
+
+## 十、用户权限字段与明文密码（2026-10-26 新增）
+
+用户明确要求：**在 `sys_user` 新增权限字段；注册用户是默认权限；只有管理员权限才能在首页看到「后台管理系统」按钮并登录后台；密码明文存储，无需加密。**
+
+| 项 | 说明 |
+|---|---|
+| 字段 | `sys_user.perm` TINYINT，`1` = 普通用户（默认权限），`0` = 管理员权限 |
+| 注册 | `RegisterController → UserServiceImpl.register()` 固定写入 `perm = 1` |
+| 密码 | `sys_user.password` **明文存储与比对**，已移除 `BCryptPasswordEncoder` |
+| 后台登录 | `AdminController` 改查 `sys_user`：密码校验通过后再查权限，非管理员直接 **403「该账号不是管理员，无权进入后台管理系统」** |
+| 权限回传 | `/api/login` 与 `/api/me` 都返回 `perm`（`LoginResult` / `MeResult`） |
+| 前端入口 | `HomeView.vue` 的「后台管理」按钮 `v-if="isAdmin"`，`perm = 1` 时根本不渲染 |
+| 路由守卫 | `/admin/login` 与 `/admin` 都带 `meta.requiresAdminPerm`，非管理员直接跳回 `/home` |
+| 迁移脚本 | `springBootTest/sql/perm-init.sql`（幂等；预置管理员 `admin / admin123`，`perm = 0`） |
+
+```bash
+cd "D:/workSpace/java/java-main/springBootTest" && "C:/Program Files/MySQL/MySQL Server 8.0/bin/mysql.exe" -u root -p123456 < sql/perm-init.sql
+```
+
+⚠️ 注意事项：
+- **BCrypt 不可逆**：迁移会把历史摘要（`$2a$` 开头）统一重置为 `123456`，原密码无法还原，需告知用户改密码。
+- 废弃的 `sys_admin` 表已不参与任何登录校验，`Admin.java` / `AdminMapper.java` 成为无用代码（保留不影响编译，可安全删除）。
+- 权限是在**登录时**缓存到本地的：某账号在数据库里被改成管理员后，必须**重新登录**才能看到后台入口。
+- ⚠️ 明文密码仅供本地演示：一旦该服务暴露到公网或多人共用，务必改回哈希（BCrypt/Argon2）存储。

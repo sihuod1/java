@@ -31,8 +31,8 @@ async function onLogin() {
       body: JSON.stringify({ username: username.value.trim(), password: password.value })
     })
     const json = await res.json()
-    if (res.status === 401) {
-      // 管理员登录过期等：清掉旧登录态让用户重登
+    if (res.status === 401 || res.status === 403) {
+      // 401 登录过期 / 403 非管理员账号：清掉旧登录态让用户重登
       clearAdminLogin()
     }
     if (!res.ok || json.code !== 0) {

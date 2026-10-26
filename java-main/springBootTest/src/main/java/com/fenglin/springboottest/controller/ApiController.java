@@ -17,6 +17,8 @@ import org.springframework.web.bind.annotation.*;
 /**
  * 增强版用户 API（对齐前端契约）：
  * 登录 / 获取个人信息 / 退出 / 改昵称 / 改密码
+ *
+ * 登录与个人信息均回传 perm，供前端判断是否展示「后台管理」入口
  */
 @RestController
 @RequestMapping("/api")
@@ -28,20 +30,25 @@ public class ApiController {
     @Autowired
     private TokenService tokenService;
 
-    /** POST /api/login -> {token, username, nickName} */
+    /** POST /api/login -> {token, username, nickName, perm} */
     @PostMapping("/login")
     public Result<LoginResult> login(@RequestBody LoginRequest req) {
         User user = userService.authenticate(req.getUsername(), req.getPassword());
         String token = tokenService.createToken(user.getId());
-        LoginResult data = new LoginResult(token, user.getUsername(), user.getNickName());
+        LoginResult data = new LoginResult(token, user.getUsername(), user.getNickName(), user.getPerm());
         return Result.ok(data);
     }
 
-    /** GET /api/me -> {username, nickName, createTime}（需登录） */
+    /** GET /api/me -> {username, nickName, createTime, perm}（需登录） */
     @GetMapping("/me")
     public Result<MeResult> me() {
         User user = userService.getById(UserContext.getUserId());
-        return Result.ok(new MeResult(user.getUsername(), user.getNickName(), user.getCreateTime()));
+        MeResult data = new MeResult(
+                user.getUsername(),
+                user.getNickName(),
+                user.getCreateTime(),
+                user.getPerm());
+        return Result.ok(data);
     }
 
     /** POST /api/logout（注销当前 token） */

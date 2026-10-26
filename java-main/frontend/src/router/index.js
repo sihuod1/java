@@ -1,5 +1,5 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
-import { isLoggedIn } from '../utils/auth'
+import { isLoggedIn, isAdmin } from '../utils/auth'
 import { isAdminLoggedIn } from '../utils/adminAuth'
 import LandingView from '../views/LandingView.vue'
 import LoginView from '../views/LoginView.vue'
@@ -37,18 +37,19 @@ const routes = [
     meta: { title: '个人中心', requiresAuth: true }
   },
   // 后台管理系统：登录页（仅登录，无注册入口）
+  // requiresAdminPerm：账号权限必须是管理员（perm = 0）才放行
   {
     path: '/admin/login',
     name: 'adminLogin',
     component: AdminLoginView,
-    meta: { title: '后台登录' }
+    meta: { title: '后台登录', requiresAdminPerm: true }
   },
-  // 后台管理系统：图鉴数据管理（需管理员登录态）
+  // 后台管理系统：图鉴数据管理（需管理员权限 + 管理员登录态）
   {
     path: '/admin',
     name: 'admin',
     component: AdminView,
-    meta: { title: '后台管理', requiresAdmin: true }
+    meta: { title: '后台管理', requiresAdmin: true, requiresAdminPerm: true }
   },
   // 兜底：未知地址回到首页
   { path: '/:pathMatch(.*)*', redirect: '/' }
@@ -64,6 +65,10 @@ const router = createRouter({
 router.beforeEach((to) => {
   if (to.meta.requiresAuth && !isLoggedIn()) {
     return { name: 'login', query: { redirect: to.fullPath } }
+  }
+  // 后台相关页面：不是管理员权限（perm = 1）挡回主页，连登录页都进不去
+  if (to.meta.requiresAdminPerm && !isAdmin()) {
+    return { name: 'home' }
   }
   // 后台页面：没有管理员登录态就去后台登录页
   if (to.meta.requiresAdmin && !isAdminLoggedIn()) {

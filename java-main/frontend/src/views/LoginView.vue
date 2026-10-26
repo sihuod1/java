@@ -66,7 +66,7 @@ async function onLogin() {
       const name = data.nickName || data.username || username.value.trim()
       // 保存登录态（token + 用户信息），后续请求自动带 Authorization 头
       if (data.token) {
-        saveLogin(data.token, { username: data.username, nickName: data.nickName })
+        saveLogin(data.token, { username: data.username, nickName: data.nickName, perm: data.perm })
       }
       // 记住我：把账号存到本地，方便下次回填
       if (remember.value) {

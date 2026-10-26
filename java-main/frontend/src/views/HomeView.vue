@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, clearLogin, getSavedUser } from '../utils/auth'
 import {
@@ -105,8 +105,12 @@ function itemsFromBase(baseName) {
 const profile = ref({
   username: getSavedUser().username || '',
   nickName: getSavedUser().nickName || '',
-  createTime: ''
+  createTime: '',
+  perm: getSavedUser().perm ?? 1
 })
+
+/** 是否具备后台管理员权限：perm = 0 才是管理员，1 为普通用户 */
+const isAdmin = computed(() => profile.value.perm === 0)
 const loading = ref(true)
 const error = ref('')
 
@@ -195,82 +199,73 @@ const traitList = computed(() =>
 /* ---------------- 详情面板 ---------------- */
 const detail = ref(null) // { kind: 'hero'|'item'|'trait', data: {} }
 
-/* 头像放大过渡：点卡片头像时，头像从原位置放大到铺满整个页面，再淡入介绍页 */
-const FLIP_MS = 460
-const heroZoom = ref(null) // { url, name, style, growing }
-let flipTimer = null
-let flipTimer2 = null
+/* ---------------- 头像放大查看 ----------------
+ * 规则：
+ *   点任意一个头像  -> 2K 立绘放大到页面的 1/2，并保持原始比例（不拉伸、不发虚）
+ *   再点页面上任意一处 -> 退出放大，回到原界面
+ * 动画：从被点头像的位置与尺寸平滑放大到屏幕中央（FLIP），关闭时原路缩回
+ * 素材：heroSplash() 返回 2K 版本（见 scripts/upscale-splash-2k.py）
+ */
+const ZOOM_MS = 380
+const zoom = ref(null) // { url, name, phase: 'prepare' | 'in' | 'out', firstStyle }
+const zoomBox = ref(null)
+let zoomTimer = null
 
-function openHeroDetail(h, ev) {
-  const faceEl = ev?.currentTarget?.closest?.('.hero-card')?.querySelector?.('.face')
-  const url = heroSplash(h.name) // 放大展示用高清立绘，保证清晰
-
-  // 没有立绘或用户偏好减少动效时，直接打开
-  const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches
-  if (!faceEl || !url || reduce) {
-    openDetail('hero', h)
-    return
+/* 已预热的 2K 图，避免重复请求 */
+const warmed = new Set()
+function warmHero(name) {
+  const url = heroSplash(name)
+  if (url && !warmed.has(url)) {
+    warmed.add(url)
+    const im = new Image()
+    im.src = url
   }
+}
 
-  const from = faceEl.getBoundingClientRect()
-  clearTimeout(flipTimer)
-  clearTimeout(flipTimer2)
+/** 点头像 -> 放大 */
+async function openZoom(name, ev) {
+  if (zoom.value) return
+  const url = heroSplash(name)
+  if (!url) return // 没有可用立绘时不处理
 
-  // ① 原尺寸、原位置铺一层高清立绘（圆形，与卡片头像位置重合）
-  heroZoom.value = {
-    url,
-    name: h.name,
-    style: {
-      left: `${from.left}px`,
-      top: `${from.top}px`,
-      width: `${from.width}px`,
-      height: `${from.height}px`,
-      transform: 'translate(0, 0)'
+  const el = ev?.currentTarget
+  const r = el?.getBoundingClientRect?.()
+  const from =
+    r && r.width
+      ? { cx: r.left + r.width / 2, cy: r.top + r.height / 2, size: Math.max(r.width, r.height) }
+      : null
+
+  clearTimeout(zoomTimer)
+  zoom.value = { url, name, phase: 'prepare', from, firstStyle: null }
+
+  // 等 DOM 出来后测量目标尺寸，算出「起点样式」
+  await nextTick()
+  const box = zoomBox.value
+  if (!box || !zoom.value) return
+  const t = box.getBoundingClientRect()
+  if (from && t.width) {
+    const s = from.size / Math.max(t.width, t.height)
+    zoom.value.firstStyle = {
+      transform: `translate(${from.cx - (t.left + t.width / 2)}px, ${from.cy - (t.top + t.height / 2)}px) scale(${s})`,
+      borderRadius: '50%'
     }
+    // 等「起点样式」真正落到布局后再切到终点，过渡才会生效
+    await nextTick()
+    if (!zoom.value) return
+    void box.offsetWidth
   }
+  requestAnimationFrame(() => {
+    if (zoom.value) zoom.value.phase = 'in'
+  })
+}
 
-  // 介绍页在底层同步准备好，放大图淡出后即可见
-  openDetail('hero', h)
-
-  // ② 强制一次布局，确保起始样式已生效，过渡才有"起点"
-  const layer = document.querySelector('.hero-zoom')
-  if (layer) void layer.offsetWidth
-
-  // ③ 放大到页面 1/2 大小并居中：宽 50% 视口、高 100% 视口
-  //    X/Y 两轴分别缩放：起点保持正圆（等比 1:1），终点正好铺满目标区域
-  const vw = window.innerWidth
-  const vh = window.innerHeight
-  const targetW = vw * 0.5
-  const sx = targetW / from.width
-  const sy = vh / from.height
-  const dx = vw / 2 - (from.left + from.width / 2)
-  const dy = vh / 2 - (from.top + from.height / 2)
-
-  // 用 setTimeout 而非 rAF：后台标签页/无头环境下 rAF 可能被节流
-  setTimeout(() => {
-    if (!heroZoom.value) return
-    heroZoom.value = {
-      ...heroZoom.value,
-      style: {
-        ...heroZoom.value.style,
-        transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`
-      }
-    }
-  }, 16)
-
-  // ③.5 铺开后显示英雄名（画面基本占满时）
-  setTimeout(() => {
-    if (heroZoom.value) heroZoom.value = { ...heroZoom.value, showName: true }
-  }, FLIP_MS * 0.55)
-
-  // ④ 停留片刻后淡出，露出下面已就位的介绍页
-  flipTimer = setTimeout(() => {
-    if (!heroZoom.value) return
-    heroZoom.value = { ...heroZoom.value, fading: true }
-    flipTimer2 = setTimeout(() => {
-      heroZoom.value = null
-    }, 280)
-  }, FLIP_MS)
+/** 点任意一处（含 ESC）-> 退出放大 */
+function closeZoom() {
+  if (!zoom.value || zoom.value.phase === 'out') return
+  zoom.value.phase = 'out'
+  zoomTimer = setTimeout(() => {
+    zoom.value = null
+  }, ZOOM_MS)
 }
 
 function openDetail(kind, data) {
@@ -278,19 +273,19 @@ function openDetail(kind, data) {
 }
 
 function closeDetail() {
-  clearTimeout(flipTimer)
-  clearTimeout(flipTimer2)
-  heroZoom.value = null
+  clearTimeout(zoomTimer)
+  zoom.value = null
   detail.value = null
 }
 
 onUnmounted(() => {
-  clearTimeout(flipTimer)
-  clearTimeout(flipTimer2)
+  clearTimeout(zoomTimer)
 })
 
 function onKeydown(e) {
-  if (e.key === 'Escape') closeDetail()
+  if (e.key !== 'Escape') return
+  if (zoom.value) closeZoom()
+  else if (detail.value) closeDetail()
 }
 
 onMounted(() => window.addEventListener('keydown', onKeydown))
@@ -357,7 +352,7 @@ function openTraitByName(name) {
 
       <div class="acts">
         <button class="btn-ghost" @click="goProfile">个人中心</button>
-        <button class="btn-admin" @click="goAdmin">后台管理</button>
+        <button v-if="isAdmin" class="btn-admin" @click="goAdmin">后台管理</button>
         <button class="btn-quit" @click="onLogout">退出登录</button>
       </div>
     </header>
@@ -406,9 +401,10 @@ function openTraitByName(name) {
           class="card hero-card"
           :style="{ '--c': COST_COLOR[h.cost] }"
           @click="openDetail('hero', h)"
+          @mouseenter="warmHero(h.name)"
         >
           <span class="cost-tag">{{ COST_LABEL[h.cost] }}</span>
-          <span class="face" @click.stop="openHeroDetail(h, $event)">
+          <span class="face" @click.stop="openZoom(h.name, $event)">
             <img v-if="heroAvatar(h.name)" :src="heroAvatar(h.name)" :alt="h.name" draggable="false" />
             <template v-else>{{ h.name.slice(0, 1) }}</template>
           </span>
@@ -482,15 +478,18 @@ function openTraitByName(name) {
 
     <p class="disclaimer">图鉴数据为演示用途整理，具体数值请以游戏内实际版本为准。</p>
 
-    <!-- ===== 头像放大过渡层（点击头像 -> 放大铺满整页 -> 淡出见介绍页） ===== -->
-    <div
-      v-if="heroZoom"
-      class="hero-zoom"
-      :class="{ fading: heroZoom.fading, 'show-name': heroZoom.showName }"
-      :style="heroZoom.style"
-    >
-      <img :src="heroZoom.url" :alt="heroZoom.name" draggable="false" />
-      <span class="hero-zoom-name">{{ heroZoom.name }}</span>
+    <!-- ===== 头像放大层：点任意头像放大到页面 1/2，再点任意处退出 ===== -->
+    <div v-if="zoom" class="zoom-layer" :class="{ out: zoom.phase === 'out' }" @click="closeZoom">
+      <figure
+        ref="zoomBox"
+        class="zoom-box"
+        :class="{ prepare: zoom.phase === 'prepare' }"
+        :style="zoom.phase === 'in' ? null : zoom.firstStyle"
+      >
+        <img :src="zoom.url" :alt="zoom.name" draggable="false" />
+        <figcaption>{{ zoom.name }}</figcaption>
+      </figure>
+      <p class="zoom-tip">点击任意处关闭</p>
     </div>
 
     <!-- ===== 详情弹窗 ===== -->
@@ -501,7 +500,7 @@ function openTraitByName(name) {
         <!-- ---- 英雄详情 ---- -->
         <template v-if="detail.kind === 'hero'">
           <div class="m-head" :style="{ '--c': COST_COLOR[detail.data.cost] }">
-            <span class="m-face">
+            <span class="m-face" @click.stop="openZoom(detail.data.name, $event)">
               <img v-if="heroAvatar(detail.data.name)" :src="heroAvatar(detail.data.name)" :alt="detail.data.name" draggable="false" />
               <template v-else>{{ detail.data.name.slice(0, 1) }}</template>
             </span>
@@ -1012,6 +1011,13 @@ function openTraitByName(name) {
   box-shadow: 0 0 14px color-mix(in srgb, var(--c) 55%, transparent);
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
   overflow: hidden;
+  cursor: zoom-in;
+  transition: transform 0.18s, box-shadow 0.18s;
+}
+
+.face:hover {
+  transform: scale(1.06);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--c) 75%, transparent);
 }
 
 .face img {
@@ -1091,56 +1097,100 @@ function openTraitByName(name) {
   padding-top: 4px;
 }
 
-/* ============ 头像放大过渡 ============ */
-.hero-zoom {
+/* ============ 头像放大查看 ============ */
+.zoom-layer {
   position: fixed;
-  z-index: 61;
-  border-radius: 50%;
-  overflow: hidden;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  background: rgba(6, 8, 20, 0.74);
+  backdrop-filter: blur(6px);
+  animation: zoom-fade 0.22s ease;
+  transition: opacity 0.32s ease, backdrop-filter 0.32s ease;
+}
+
+.zoom-layer.out {
+  opacity: 0;
+  backdrop-filter: blur(0);
   pointer-events: none;
-  transition:
-    transform 0.46s cubic-bezier(0.4, 0, 0.2, 1),
-    border-radius 0.46s ease,
-    opacity 0.28s ease;
+}
+
+@keyframes zoom-fade {
+  from { opacity: 0; }
+}
+
+/* 目标尺寸即「页面的一半」：宽 50vw，高度按原图比例自适应（不裁切、不拉伸） */
+.zoom-box {
+  position: relative;
+  width: max(50vw, 260px);
+  margin: 0;
+  border-radius: 18px;
+  overflow: hidden;
+  background: #0b0d1e;
+  border: 1px solid rgba(247, 215, 116, 0.45);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.62), 0 0 44px rgba(247, 215, 116, 0.12);
   transform-origin: center;
+  transition:
+    transform 0.38s cubic-bezier(0.22, 0.8, 0.24, 1),
+    border-radius 0.38s ease;
   will-change: transform, border-radius;
 }
 
-/* 放大过程中逐渐从圆形变成铺满（直角） */
-.hero-zoom.fading {
-  opacity: 0;
-  border-radius: 0;
+/* 第一帧：贴在被点头像的位置，禁用过渡，保证动画有起点 */
+.zoom-box.prepare {
+  transition: none;
 }
 
-.hero-zoom img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+.zoom-box img {
   display: block;
+  width: 100%;
+  height: auto;
+  user-select: none;
 }
 
-/* 放大到全屏时中央浮现英雄名 */
-.hero-zoom-name {
+.zoom-box figcaption {
   position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  font-size: clamp(38px, 9vw, 96px);
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 0;
+  width: max-content;
+  max-width: 90%;
+  padding: 22px 18px 14px;
+  font-size: clamp(15px, 2.2vw, 22px);
   font-weight: 800;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.14em;
+  text-align: center;
   color: #fff;
-  text-shadow: 0 4px 30px rgba(0, 0, 0, 0.85), 0 0 60px rgba(0, 0, 0, 0.65);
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.55) 60%, rgba(0, 0, 0, 0.8));
+  border-radius: 14px 14px 0 0;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.78));
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9);
   opacity: 0;
-  transition: opacity 0.3s ease;
-  pointer-events: none;
+  transition: opacity 0.3s ease 0.12s;
 }
 
-.hero-zoom.show-name .hero-zoom-name {
+.zoom-layer:not(.out) .zoom-box figcaption {
   opacity: 1;
 }
 
+.zoom-tip {
+  position: absolute;
+  bottom: 26px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: var(--muted);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .hero-zoom { transition: none; }
+  .zoom-box,
+  .zoom-layer {
+    transition: none;
+  }
 }
 
 /* ============ 详情弹窗 ============ */
@@ -1221,6 +1271,12 @@ function openTraitByName(name) {
   box-shadow: 0 0 18px color-mix(in srgb, var(--c, #e0a93b) 55%, transparent);
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.85);
   overflow: hidden;
+  cursor: zoom-in;
+  transition: transform 0.18s;
+}
+
+.m-face:hover {
+  transform: scale(1.06);
 }
 
 .m-face img {

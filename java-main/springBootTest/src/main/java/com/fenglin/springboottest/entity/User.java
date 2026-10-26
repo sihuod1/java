@@ -12,6 +12,12 @@ import java.time.LocalDateTime;
 @TableName("sys_user")
 public class User {
 
+    /** 权限：管理员（可登录后台管理系统） */
+    public static final Integer PERM_ADMIN = 0;
+
+    /** 权限：普通用户（默认权限，注册即此值） */
+    public static final Integer PERM_USER = 1;
+
     /** 主键，自增 */
     @TableId(type = IdType.AUTO)
     private Long id;
@@ -19,7 +25,7 @@ public class User {
     /** 登录账号 */
     private String username;
 
-    /** 登录密码（BCrypt 加密存储） */
+    /** 登录密码（明文存储） */
     private String password;
 
     /** 昵称 */
@@ -27,6 +33,9 @@ public class User {
 
     /** 状态：1-正常 0-禁用 */
     private Integer status;
+
+    /** 权限：1-普通用户（默认） 0-管理员 */
+    private Integer perm;
 
     /** 创建时间 */
     private LocalDateTime createTime;
@@ -74,6 +83,14 @@ public class User {
         this.status = status;
     }
 
+    public Integer getPerm() {
+        return perm;
+    }
+
+    public void setPerm(Integer perm) {
+        this.perm = perm;
+    }
+
     public LocalDateTime getCreateTime() {
         return createTime;
     }
@@ -88,5 +105,10 @@ public class User {
 
     public void setUpdateTime(LocalDateTime updateTime) {
         this.updateTime = updateTime;
+    }
+
+    /** 是否管理员权限（仅 perm = 0 为管理员） */
+    public boolean isAdmin() {
+        return PERM_ADMIN.equals(this.perm);
     }
 }

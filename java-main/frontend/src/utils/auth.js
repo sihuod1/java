@@ -37,6 +37,19 @@ export function getSavedUser() {
 }
 
 /**
+ * 当前账号权限：0-管理员（可进后台管理系统） 1-普通用户（默认）
+ * 取不到或值异常时按最保守的「普通用户」处理
+ */
+export function getPerm() {
+  return getSavedUser().perm === 0 ? 0 : 1
+}
+
+/** 是否具备后台管理员权限（决定「后台管理」入口是否可见） */
+export function isAdmin() {
+  return getPerm() === 0
+}
+
+/**
  * 统一请求封装：
  * - 自动拼接 API_BASE 和 Authorization 头
  * - 返回后端统一结构 {code, message, data}，code=0 时返回 data
