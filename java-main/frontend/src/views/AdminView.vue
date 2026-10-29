@@ -72,10 +72,62 @@ function jsonToText(s) {
   return Array.isArray(v) ? v.join('，') : ''
 }
 
-/** 后端返回的 JSON 字符串 -> 格式化文本（对象用） */
-function jsonToPretty(s) {
+/* ---------------- 属性 / 等级效果：文字 <-> JSON ---------------- */
+// 属性中文标签与 JSON 键的映射（与首页 STAT_LABEL 保持一致）
+const STAT_FIELDS = [
+  { key: 'hp', label: '生命值' },
+  { key: 'ad', label: '攻击力' },
+  { key: 'armor', label: '护甲' },
+  { key: 'mr', label: '魔法抗性' },
+  { key: 'as', label: '攻击速度' },
+  { key: 'mana', label: '法力值' }
+]
+
+/** stats JSON 字符串 -> 文字表单对象 { hp: '700', ... } */
+function statsJsonToForm(s) {
   const v = tryParse(s)
-  return v == null ? '' : JSON.stringify(v, null, 2)
+  const form = {}
+  for (const f of STAT_FIELDS) {
+    form[f.key] = v && v[f.key] != null ? String(v[f.key]) : ''
+  }
+  return form
+}
+
+/** 文字表单对象 -> stats JSON 字符串；非数字内容抛错 */
+function statsFormToJson(form) {
+  const obj = {}
+  for (const f of STAT_FIELDS) {
+    const raw = (form[f.key] || '').toString().trim()
+    if (raw === '') continue
+    const num = Number(raw)
+    if (Number.isNaN(num)) throw new Error(`属性「${f.label}」请填写数字`)
+    obj[f.key] = num
+  }
+  return obj
+}
+
+/** tiers JSON -> 文本（每行一条「人数：效果」） */
+function tiersJsonToText(s) {
+  const v = tryParse(s)
+  if (!Array.isArray(v)) return ''
+  return v
+    .filter((x) => x && x.count != null)
+    .map((x) => `${x.count}：${x.desc || ''}`)
+    .join('\n')
+}
+
+/** 文本 -> tiers 数组；每行格式「人数：效果」（兼容 2人： / 2: 等写法） */
+function tiersTextToJson(s) {
+  if (!s || !s.trim()) return []
+  const arr = []
+  for (let line of s.split(/\n+/)) {
+    line = line.trim()
+    if (!line) continue
+    const m = line.match(/^(\d+)\s*(?:人|名|个)?\s*[：:=]\s*(.*)$/)
+    if (!m) throw new Error(`等级效果每行格式应为「人数：效果」，如「2：所有骑士获得 15% 伤害减免」。当前行：「${line}」`)
+    arr.push({ count: Number(m[1]), desc: m[2].trim() })
+  }
+  return arr
 }
 
 /** 逗号分隔文本（支持中英文逗号） -> JSON 字符串 */
@@ -98,7 +150,7 @@ function openCreate(kind) {
   if (kind === 'hero') {
     heroForm.value = {
       name: '', en: '', cost: 1, traitsText: '', role: '', tagline: '',
-      skillName: '', skillDesc: '', itemsText: '', statsText: '', tip: '', sort: nextSort(heroes)
+      skillName: '', skillDesc: '', itemsText: '', stats: statsJsonToForm(null), tip: '', sort: nextSort(heroes)
     }
   } else if (kind === 'item') {
     itemForm.value = {
@@ -119,7 +171,7 @@ function openEdit(kind, row) {
       name: row.name, en: row.en || '', cost: row.cost,
       traitsText: jsonToText(row.traits), role: row.role || '', tagline: row.tagline || '',
       skillName: row.skillName || '', skillDesc: row.skillDesc || '',
-      itemsText: jsonToText(row.items), statsText: jsonToPretty(row.stats),
+      itemsText: jsonToText(row.items), stats: statsJsonToForm(row.stats),
       tip: row.tip || '', sort: row.sort ?? 0
     }
   } else if (kind === 'item') {
@@ -131,7 +183,7 @@ function openEdit(kind, row) {
   } else {
     traitForm.value = {
       name: row.name, type: row.type, icon: row.icon || '',
-      tiersText: jsonToPretty(row.tiers), tip: row.tip || '', sort: row.sort ?? 0
+      tiersText: tiersJsonToText(row.tiers), tip: row.tip || '', sort: row.sort ?? 0
     }
   }
   editing.value = kind
@@ -149,8 +201,12 @@ function nextSort(list) {
 async function saveHero() {
   const f = heroForm.value
   if (!f.name.trim()) return notify('err', '英雄名不能为空')
-  const stats = tryParse(f.statsText)
-  if (stats === undefined) return notify('err', '属性 stats 不是合法 JSON')
+  let statsObj
+  try {
+    statsObj = statsFormToJson(f.stats)
+  } catch (e) {
+    return notify('err', e.message)
+  }
   saving.value = true
   try {
     const body = {
@@ -158,7 +214,7 @@ async function saveHero() {
       traits: textToJsonArray(f.traitsText), role: f.role, tagline: f.tagline,
       skillName: f.skillName, skillDesc: f.skillDesc,
       items: textToJsonArray(f.itemsText),
-      stats: stats == null ? null : JSON.stringify(stats),
+      stats: Object.keys(statsObj).length ? JSON.stringify(statsObj) : null,
       tip: f.tip, sort: Number(f.sort) || 0
     }
     if (editingId.value) {
@@ -208,13 +264,17 @@ async function saveItem() {
 async function saveTrait() {
   const f = traitForm.value
   if (!f.name.trim()) return notify('err', '羁绊名不能为空')
-  const tiers = tryParse(f.tiersText)
-  if (tiers === undefined) return notify('err', '等级效果 tiers 不是合法 JSON（应为 [{count, desc}] 数组）')
+  let tiers
+  try {
+    tiers = tiersTextToJson(f.tiersText)
+  } catch (e) {
+    return notify('err', e.message)
+  }
   saving.value = true
   try {
     const body = {
       name: f.name.trim(), type: f.type, icon: f.icon,
-      tiers: tiers == null ? null : JSON.stringify(tiers),
+      tiers: tiers.length ? JSON.stringify(tiers) : null,
       tip: f.tip, sort: Number(f.sort) || 0
     }
     if (editingId.value) {
@@ -267,7 +327,19 @@ async function onLogout() {
   router.replace({ name: 'adminLogin' })
 }
 
+/* ---------------- 侧边栏分组折叠 ---------------- */
+const open = ref({ codex: true, sys: true })
+
+function toggleGroup(g) {
+  open.value[g] = !open.value[g]
+}
+
 /* ---------------- 展示辅助 ---------------- */
+const avatarChar = computed(() => {
+  const name = admin.nickName || admin.username || 'A'
+  return name.charAt(0).toUpperCase()
+})
+
 const COST_LABEL = { 1: '一费', 2: '二费', 3: '三费', 4: '四费', 5: '五费' }
 const COST_COLOR = { 1: '#8f9bb3', 2: '#2fae5f', 3: '#3b8bf5', 4: '#b45cf0', 5: '#f5b942' }
 
@@ -291,41 +363,72 @@ const curListLen = computed(() =>
 
 <template>
   <div class="admin">
-    <!-- ===== 顶栏 ===== -->
-    <header class="admin-top">
-      <div class="brand">
-        <svg width="26" height="26" viewBox="0 0 64 64" fill="none">
-          <path d="M32 6l20 7v16c0 13.5-8.5 24.5-20 29-11.5-4.5-20-15.5-20-29V13l20-7z" stroke="#f7d774" stroke-width="4" fill="rgba(247,215,116,0.12)" />
-        </svg>
-        <b>金铲铲 · 后台管理系统</b>
+    <!-- ===== 侧边栏（RuoYi 风格：资料卡 + 分组折叠菜单） ===== -->
+    <aside class="side">
+      <!-- 用户资料卡 -->
+      <div class="profile">
+        <div class="avatar">{{ avatarChar }}</div>
+        <div class="p-info">
+          <b>{{ admin.nickName || admin.username || '管理员' }}</b>
+          <span>金铲铲 · 后台管理</span>
+        </div>
       </div>
-      <div class="admin-acts">
-        <span class="who">👤 {{ admin.nickName || admin.username || '管理员' }}</span>
-        <a href="#/" class="link">返回首页</a>
-        <button class="ghost" @click="onLogout">退出登录</button>
+
+      <!-- 菜单 -->
+      <nav class="menu">
+        <a class="m-item" href="#/"><span class="mi">🏠</span>主页</a>
+
+        <div class="m-group">
+          <button class="m-item g" :class="{ open: open.codex }" @click="toggleGroup('codex')">
+            <span class="mi">📖</span>图鉴管理
+            <svg class="arrow" width="12" height="12" viewBox="0 0 12 12">
+              <path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
+          <div v-show="open.codex" class="m-sub">
+            <button :class="{ on: tab === 'hero' }" @click="tab = 'hero'">
+              ⚔️ 英雄管理 <i>{{ heroes.length }}</i>
+            </button>
+            <button :class="{ on: tab === 'item' }" @click="tab = 'item'">
+              🛡️ 装备管理 <i>{{ items.length }}</i>
+            </button>
+            <button :class="{ on: tab === 'trait' }" @click="tab = 'trait'">
+              ✨ 羁绊管理 <i>{{ traits.length }}</i>
+            </button>
+          </div>
+        </div>
+
+        <div class="m-group">
+          <button class="m-item g" :class="{ open: open.sys }" @click="toggleGroup('sys')">
+            <span class="mi">⚙️</span>系统管理
+            <svg class="arrow" width="12" height="12" viewBox="0 0 12 12">
+              <path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
+          <div v-show="open.sys" class="m-sub">
+            <a href="#/">↩ 返回首页</a>
+            <button class="logout" @click="onLogout">⏻ 退出登录</button>
+          </div>
+        </div>
+      </nav>
+
+      <div class="side-copy">© 2026 金铲铲图鉴</div>
+    </aside>
+
+    <!-- ===== 内容区 ===== -->
+    <main class="content">
+      <h1 class="page-title">
+        {{ tab === 'hero' ? '英雄管理' : tab === 'item' ? '装备管理' : '羁绊管理' }}
+        <small>共 {{ curListLen }} 条</small>
+      </h1>
+
+      <!-- ===== 工具条 ===== -->
+      <div class="toolbar">
+        <p class="tip">这里的增删改会实时同步到首页图鉴展示。</p>
+        <button class="primary" @click="openCreate(tab)">
+          ＋ 新增{{ tab === 'hero' ? '英雄' : tab === 'item' ? '装备' : '羁绊' }}
+        </button>
       </div>
-    </header>
-
-    <!-- ===== Tab 切换 ===== -->
-    <nav class="admin-tabs">
-      <button :class="{ on: tab === 'hero' }" @click="tab = 'hero'">
-        英雄管理 <i>{{ heroes.length }}</i>
-      </button>
-      <button :class="{ on: tab === 'item' }" @click="tab = 'item'">
-        装备管理 <i>{{ items.length }}</i>
-      </button>
-      <button :class="{ on: tab === 'trait' }" @click="tab = 'trait'">
-        羁绊管理 <i>{{ traits.length }}</i>
-      </button>
-    </nav>
-
-    <!-- ===== 工具条 ===== -->
-    <div class="toolbar">
-      <p class="tip">这里的增删改会实时同步到首页图鉴展示。</p>
-      <button class="primary" @click="openCreate(tab)">
-        ＋ 新增{{ tab === 'hero' ? '英雄' : tab === 'item' ? '装备' : '羁绊' }}
-      </button>
-    </div>
 
     <!-- ===== 英雄表 ===== -->
     <div v-if="tab === 'hero'" class="table-wrap">
@@ -438,6 +541,7 @@ const curListLen = computed(() =>
 
     <p v-if="loading" class="loading">加载中…</p>
     <p class="foot-note">数据变更后，刷新首页（/home）即可看到最新图鉴内容。</p>
+    </main>
 
     <!-- ===== 编辑弹窗 ===== -->
     <div v-if="editing" class="mask" @click.self="closeEdit">
@@ -476,9 +580,12 @@ const curListLen = computed(() =>
           </div>
           <label>技能描述<textarea v-model="heroForm.skillDesc" rows="2" /></label>
           <label>使用心得<textarea v-model="heroForm.tip" rows="2" /></label>
-          <label>属性 JSON（{hp, ad, armor, mr, as, mana}）
-            <textarea v-model="heroForm.statsText" rows="4" spellcheck="false" placeholder='{"hp":700,"ad":55,"armor":35,"mr":25,"as":0.6,"mana":60}' />
-          </label>
+          <p class="hint" style="margin: 0 0 8px">属性（直接填数字即可，留空的项不保存）</p>
+          <div class="stats-grid">
+            <label v-for="f in STAT_FIELDS" :key="f.key">{{ f.label }}
+              <input v-model="heroForm.stats[f.key]" placeholder="如：700" />
+            </label>
+          </div>
           <p class="hint">提示：新增英雄若英文名没有对应本地头像，卡片会自动显示名字首字。</p>
           <button class="primary big" type="submit" :disabled="saving">{{ saving ? '保存中…' : '保 存' }}</button>
         </form>
@@ -519,8 +626,8 @@ const curListLen = computed(() =>
             <label>图标标识<input v-model="traitForm.icon" placeholder="如：shield / bow / sword" /></label>
             <label>排序<input v-model.number="traitForm.sort" type="number" /></label>
           </div>
-          <label>等级效果 JSON（[{count, desc}]）
-            <textarea v-model="traitForm.tiersText" rows="5" spellcheck="false" placeholder='[{"count":2,"desc":"所有骑士获得 15% 伤害减免"}]' />
+          <label>等级效果（每行一条，格式「人数：效果」）
+            <textarea v-model="traitForm.tiersText" rows="5" placeholder="2：所有骑士获得 15% 伤害减免&#10;4：所有骑士获得 30% 伤害减免&#10;6：所有骑士获得 45% 伤害减免" />
           </label>
           <label>使用心得<textarea v-model="traitForm.tip" rows="2" /></label>
           <button class="primary big" type="submit" :disabled="saving">{{ saving ? '保存中…' : '保 存' }}</button>
@@ -549,52 +656,217 @@ const curListLen = computed(() =>
 </template>
 
 <style scoped>
-/* ===== 整体 ===== */
+/* ===== 整体：侧边栏 + 内容区 双栏 ===== */
 .admin {
-  width: min(1240px, 94vw);
+  width: min(1280px, 96vw);
   margin: 0 auto;
   padding: 26px 0 60px;
+  display: grid;
+  grid-template-columns: 216px 1fr;
+  gap: 20px;
+  align-items: start;
 }
 
-/* ===== 顶栏 ===== */
-.admin-top {
+/* ===== 侧边栏 ===== */
+.side {
+  position: sticky;
+  top: 20px;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 14px 20px;
-  border-radius: 14px;
-  background: linear-gradient(180deg, rgba(30, 34, 66, 0.9), rgba(16, 19, 42, 0.94));
-  border: 1px solid rgba(247, 215, 116, 0.22);
+  flex-direction: column;
+  padding: 0 0 14px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #1c2145, #12142e 70%);
+  border: 1px solid rgba(247, 215, 116, 0.18);
+  min-height: calc(100vh - 130px);
+  overflow: hidden;
 }
 
-.brand {
+/* 用户资料卡（仿 RuoYi） */
+.profile {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 17px;
+  gap: 12px;
+  padding: 22px 18px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.avatar {
+  width: 46px;
+  height: 46px;
+  flex: none;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 700;
+  color: #3a2a06;
+  background: linear-gradient(160deg, var(--gold-1), var(--gold-3));
+  box-shadow: 0 0 0 3px rgba(247, 215, 116, 0.18), 0 6px 14px rgba(0, 0, 0, 0.35);
+}
+
+.p-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.p-info b {
+  color: var(--gold-1);
+  font-size: 15px;
   letter-spacing: 1px;
-  color: var(--gold-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.admin-acts {
+.p-info span {
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.5px;
+}
+
+/* 菜单 */
+.menu {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 10px 0;
+  gap: 2px;
+}
+
+.m-item {
   display: flex;
   align-items: center;
-  gap: 14px;
-  font-size: 13px;
-}
-
-.who {
-  color: var(--muted);
-}
-
-.link {
-  color: var(--gold-1);
+  gap: 9px;
+  width: 100%;
+  border: none;
+  border-radius: 8px;
+  padding: 11px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  color: #c6cbe0;
+  cursor: pointer;
+  background: transparent;
+  text-align: left;
   text-decoration: none;
+  transition: all 0.18s;
 }
 
-.link:hover {
-  text-decoration: underline;
+.m-item:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.m-item .mi {
+  font-size: 15px;
+  width: 20px;
+  text-align: center;
+}
+
+.m-item .arrow {
+  margin-left: auto;
+  opacity: 0.55;
+  transition: transform 0.22s;
+}
+
+.m-item.g.open .arrow {
+  transform: rotate(180deg);
+}
+
+/* 子菜单 */
+.m-sub {
+  display: flex;
+  flex-direction: column;
+  margin: 2px 0 4px;
+  padding-left: 12px;
+  border-left: 1px solid rgba(247, 215, 116, 0.14);
+  margin-left: 21px;
+}
+
+.m-sub button,
+.m-sub a {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--muted);
+  cursor: pointer;
+  background: transparent;
+  text-align: left;
+  text-decoration: none;
+  transition: all 0.18s;
+}
+
+.m-sub button:hover,
+.m-sub a:hover {
+  color: var(--ink);
+  background: rgba(247, 215, 116, 0.07);
+}
+
+.m-sub button i {
+  font-style: normal;
+  margin-left: auto;
+  font-size: 11px;
+  opacity: 0.75;
+  background: rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  padding: 1px 7px;
+}
+
+.m-sub button.on {
+  color: #3a2a06;
+  font-weight: 700;
+  background: linear-gradient(180deg, var(--gold-1), var(--gold-2) 60%, var(--gold-3));
+  box-shadow: 0 5px 14px rgba(247, 215, 116, 0.28);
+}
+
+.m-sub button.on i {
+  background: rgba(0, 0, 0, 0.18);
+  opacity: 1;
+}
+
+.m-sub .logout {
+  color: #e88;
+}
+
+.m-sub .logout:hover {
+  color: #ff9a8b;
+  background: rgba(229, 100, 92, 0.12);
+}
+
+.side-copy {
+  margin-top: auto;
+  padding: 16px 18px 0;
+  font-size: 11px;
+  color: rgba(198, 203, 224, 0.4);
+  letter-spacing: 0.5px;
+}
+
+/* ===== 内容区 ===== */
+.content {
+  min-width: 0; /* 防表格撑破 */
+}
+
+.page-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 20px;
+  letter-spacing: 2px;
+  color: var(--gold-1);
+  margin: 4px 2px 14px;
+}
+
+.page-title small {
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--muted);
 }
 
 /* ===== 按钮 ===== */
@@ -643,46 +915,12 @@ const curListLen = computed(() =>
   border-color: rgba(247, 215, 116, 0.4);
 }
 
-/* ===== Tab ===== */
-.admin-tabs {
-  display: flex;
-  gap: 10px;
-  margin-top: 18px;
-}
-
-.admin-tabs button {
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 10px;
-  padding: 10px 20px;
-  font-size: 14px;
-  font-family: inherit;
-  color: var(--muted);
-  background: rgba(16, 19, 42, 0.6);
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.admin-tabs button i {
-  font-style: normal;
-  opacity: 0.75;
-  margin-left: 4px;
-  font-size: 12px;
-}
-
-.admin-tabs button.on {
-  color: #3a2a06;
-  font-weight: 700;
-  background: linear-gradient(180deg, var(--gold-1), var(--gold-2) 60%, var(--gold-3));
-  border-color: transparent;
-  box-shadow: 0 6px 18px rgba(247, 215, 116, 0.3);
-}
-
 /* ===== 工具条 ===== */
 .toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin: 16px 2px 10px;
+  margin: 0 2px 10px;
 }
 
 .toolbar .tip {
@@ -893,6 +1131,18 @@ tbody tr:last-child td {
   gap: 14px;
 }
 
+/* 属性网格：两行三列的中文标签数字输入 */
+.form .stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.form .stats-grid label {
+  margin-bottom: 0;
+}
+
 .form input,
 .form select,
 .form textarea {
@@ -946,12 +1196,74 @@ tbody tr:last-child td {
 }
 
 @media (max-width: 760px) {
-  .admin-top {
+  /* 小屏：双栏变单栏，侧边栏收成顶部卡片 */
+  .admin {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .side {
+    position: static;
+    min-height: 0;
+  }
+
+  .profile {
+    padding: 16px 16px 12px;
+  }
+
+  .avatar {
+    width: 38px;
+    height: 38px;
+    font-size: 16px;
+  }
+
+  .menu {
+    flex-direction: row;
     flex-wrap: wrap;
+    gap: 4px;
+    padding: 8px 10px 4px;
+  }
+
+  .m-item {
+    width: auto;
+    padding: 9px 12px;
+    font-size: 13px;
+  }
+
+  .m-group {
+    width: auto;
+  }
+
+  /* 小屏下分组菜单直接平铺为子项，不占额外一层 */
+  .m-sub {
+    position: static;
+    border-left: none;
+    padding-left: 0;
+    margin-left: 0;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .m-sub button,
+  .m-sub a {
+    padding: 8px 10px;
+  }
+
+  .side-copy {
+    display: none;
+  }
+
+  .page-title {
+    font-size: 17px;
   }
 
   .form .row2 {
     grid-template-columns: 1fr;
+  }
+
+  .form .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 </style>

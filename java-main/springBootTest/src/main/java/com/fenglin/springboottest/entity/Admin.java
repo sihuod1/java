@@ -19,7 +19,7 @@ public class Admin {
     /** 管理员账号 */
     private String username;
 
-    /** 密码（BCrypt 加密存储） */
+    /** 密码（明文存储，与 sys_user 一致，仅作废弃表兼容） */
     private String password;
 
     /** 昵称 */

@@ -14,6 +14,8 @@ import {
 import ItemIcon from '../components/ItemIcon.vue'
 import TraitIcon from '../components/TraitIcon.vue'
 import { heroAvatar, heroSplash } from '../data/heroAvatars'
+import userAvatar from '../assets/user-avatar.jpeg'
+import userAvatar2k from '../assets/user-avatar-2k.jpeg'
 
 const router = useRouter()
 
@@ -140,10 +142,6 @@ function goAdmin() {
   router.push({ name: 'adminLogin' })
 }
 
-function avatarText(name) {
-  return (name || '?').slice(0, 1).toUpperCase()
-}
-
 function formatDate(v) {
   if (!v) return '未知'
   return String(v).slice(0, 10).replace(/-/g, '.')
@@ -222,11 +220,18 @@ function warmHero(name) {
   }
 }
 
-/** 点头像 -> 放大 */
+/** 点头像 -> 放大（英雄立绘：按名字取 2K 图） */
 async function openZoom(name, ev) {
-  if (zoom.value) return
   const url = heroSplash(name)
   if (!url) return // 没有可用立绘时不处理
+  return openZoomByUrl(url, name, ev)
+}
+
+/** 按图片 URL 放大：宽 50vw、高度按原图比例，FLIP 从被点击元素放大
+ *  square=true 时（头像等方图）宽度取 min(50vw, 82vh)，避免竖屏/小屏超出可视区
+ */
+async function openZoomByUrl(url, name, ev, square = false) {
+  if (zoom.value || !url) return
 
   const el = ev?.currentTarget
   const r = el?.getBoundingClientRect?.()
@@ -236,7 +241,7 @@ async function openZoom(name, ev) {
       : null
 
   clearTimeout(zoomTimer)
-  zoom.value = { url, name, phase: 'prepare', from, firstStyle: null }
+  zoom.value = { url, name, square, phase: 'prepare', from, firstStyle: null }
 
   // 等 DOM 出来后测量目标尺寸，算出「起点样式」
   await nextTick()
@@ -322,7 +327,13 @@ function openTraitByName(name) {
   <div class="home">
     <!-- ===== 顶部召唤师信息条 ===== -->
     <header class="summoner">
-      <div class="avatar">{{ avatarText(profile.nickName || profile.username) }}</div>
+      <img
+        class="avatar"
+        :src="userAvatar"
+        alt="召唤师头像"
+        title="点击查看大图"
+        @click="openZoomByUrl(userAvatar2k, '', $event, true)"
+      />
 
       <div class="who">
         <template v-if="loading">
@@ -483,11 +494,11 @@ function openTraitByName(name) {
       <figure
         ref="zoomBox"
         class="zoom-box"
-        :class="{ prepare: zoom.phase === 'prepare' }"
+        :class="{ prepare: zoom.phase === 'prepare', sq: zoom.square }"
         :style="zoom.phase === 'in' ? null : zoom.firstStyle"
       >
-        <img :src="zoom.url" :alt="zoom.name" draggable="false" />
-        <figcaption>{{ zoom.name }}</figcaption>
+        <img :src="zoom.url" :alt="zoom.name || '图片预览'" draggable="false" />
+        <figcaption v-if="zoom.name">{{ zoom.name }}</figcaption>
       </figure>
       <p class="zoom-tip">点击任意处关闭</p>
     </div>
@@ -627,16 +638,13 @@ function openTraitByName(name) {
           </ul>
 
           <h4 class="sec">拥有此羁绊的英雄</h4>
-          <div class="rec-heroes">
-            <button
-              v-for="nm in heroesOfTrait(detail.data.name)"
-              :key="nm"
-              class="hero-chip"
-              @click="openHeroByName(nm)"
-            >
-              {{ nm }}
-            </button>
-          </div>
+          <p v-if="heroesOfTrait(detail.data.name).length" class="trait-hero-text">
+            <template v-for="(nm, i) in heroesOfTrait(detail.data.name)" :key="nm">
+              <button class="hero-link" @click="openHeroByName(nm)">{{ nm }}</button>
+              <span v-if="i < heroesOfTrait(detail.data.name).length - 1" class="sep">、</span>
+            </template>
+          </p>
+          <p v-else class="trait-hero-text">暂无</p>
 
           <h4 class="sec">搭配建议</h4>
           <p class="tip">{{ detail.data.tip }}</p>
@@ -671,17 +679,21 @@ function openTraitByName(name) {
 }
 
 .avatar {
-  width: 52px;
-  height: 52px;
+  width: 156px; /* 原 52px × 3 */
+  height: 156px;
   flex: 0 0 auto;
   border-radius: 50%;
-  display: grid;
-  place-items: center;
-  font-size: 22px;
-  font-weight: 700;
-  color: #3a2a06;
-  background: linear-gradient(180deg, var(--gold-1), var(--gold-2) 60%, var(--gold-3));
+  object-fit: cover; /* 图片头像：裁剪填满圆形，不拉伸 */
   box-shadow: 0 6px 18px rgba(247, 215, 116, 0.32);
+  border: 3px solid rgba(247, 215, 116, 0.45);
+  background: rgba(16, 19, 42, 0.78);
+  cursor: zoom-in;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.avatar:hover {
+  transform: scale(1.06);
+  box-shadow: 0 8px 22px rgba(247, 215, 116, 0.45);
 }
 
 .who {
@@ -1143,6 +1155,11 @@ function openTraitByName(name) {
   transition: none;
 }
 
+/* 方形图（如召唤师头像）：宽取页面一半，同时受可视高度约束，保证整图完整可见 */
+.zoom-box.sq {
+  width: min(50vw, 82vh);
+}
+
 .zoom-box img {
   display: block;
   width: 100%;
@@ -1549,6 +1566,37 @@ button.rec-piece:hover {
 .hero-chip:hover {
   background: rgba(247, 215, 116, 0.18);
   border-color: var(--gold-1);
+}
+
+/* 羁绊详情：拥有该羁绊的英雄（纯文字书写，无按钮外观） */
+.trait-hero-text {
+  font-size: 13.5px;
+  line-height: 1.9;
+  color: var(--muted);
+  word-break: break-word;
+}
+
+/* 名字仍是可点的文字链接，但视觉上就是正文 */
+.hero-link {
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--gold-1);
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.hero-link:hover {
+  color: #ffe9a8;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.trait-hero-text .sep {
+  color: rgba(255, 255, 255, 0.28);
 }
 
 /* 羁绊等级 */
