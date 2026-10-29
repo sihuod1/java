@@ -1,7 +1,7 @@
 /*
  Navicat Premium Dump SQL
 
- Source Server         : localhost_3306
+ Source Server         : test
  Source Server Type    : MySQL
  Source Server Version : 80039 (8.0.39)
  Source Host           : localhost:3306
@@ -11,7 +11,7 @@
  Target Server Version : 80039 (8.0.39)
  File Encoding         : 65001
 
- Date: 26/10/2026 09:54:24
+ Date: 29/10/2026 15:10:41
 */
 
 SET NAMES utf8mb4;
@@ -39,7 +39,7 @@ CREATE TABLE `codex_hero`  (
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_hero_name`(`name` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 24 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '英雄图鉴' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 24 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '英雄图鉴' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Records of codex_hero
@@ -85,7 +85,7 @@ CREATE TABLE `codex_item`  (
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_item_name`(`name` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 29 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '装备图鉴' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 29 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '装备图鉴' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Records of codex_item
@@ -135,7 +135,7 @@ CREATE TABLE `codex_trait`  (
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_trait_name`(`name` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 25 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '羁绊图鉴' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 25 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '羁绊图鉴' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Records of codex_trait
@@ -178,13 +178,13 @@ CREATE TABLE `sys_admin`  (
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_admin_username`(`username` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 3 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '后台管理员表' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 3 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '后台管理员表' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Records of sys_admin
 -- ----------------------------
-INSERT INTO `sys_admin` VALUES (1, 'admin', '$2a$10$JJC22pnZj23nejG74F3gou/MdDKwdoUbOAcjLUHrVOBCw.4NP236.', '管理员', '2026-10-26 09:00:47', '2026-10-26 09:00:47');
-INSERT INTO `sys_admin` VALUES (2, 'testuser01', '$2a$10$HNfwXn3LEsjRAFmPUN2zSezGpvQHbA7fUlRLqLB8BVZ/kRzw9BFP6', '我的账号', '2026-10-26 09:00:47', '2026-10-26 09:00:47');
+INSERT INTO `sys_admin` VALUES (1, 'admin', 'admin123', '管理员', '2026-10-26 09:00:47', '2026-10-29 14:11:01');
+INSERT INTO `sys_admin` VALUES (2, 'testuser01', '123456', '我的账号', '2026-10-26 09:00:47', '2026-10-29 14:11:01');
 
 -- ----------------------------
 -- Table structure for sys_user
@@ -207,8 +207,8 @@ CREATE TABLE `sys_user`  (
 -- Records of sys_user
 -- ----------------------------
 INSERT INTO `sys_user` VALUES (1, '123456', '123456', '123456', 1, 1, '2026-10-09 14:08:04', '2026-10-26 09:39:42');
-INSERT INTO `sys_user` VALUES (2, 'testuser01', '123456', '金铲铲大师', 1, 1, '2026-10-09 14:17:08', '2026-10-26 09:39:42');
-INSERT INTO `sys_user` VALUES (3, 'DDDD', '123456', 'DDDD', 1, 0, '2026-10-26 09:04:25', '2026-10-26 09:51:08');
+INSERT INTO `sys_user` VALUES (2, 'testuser01', '123456', '卸妆心灵', 1, 1, '2026-10-09 14:17:08', '2026-10-29 14:53:21');
+INSERT INTO `sys_user` VALUES (3, 'DDDD', '123456', '卸妆心灵', 1, 0, '2026-10-26 09:04:25', '2026-10-29 14:58:06');
 INSERT INTO `sys_user` VALUES (4, 'admin', 'admin123', '超级管理员', 1, 0, '2026-10-26 09:39:42', '2026-10-26 09:39:42');
 
 SET FOREIGN_KEY_CHECKS = 1;
