@@ -137,6 +137,11 @@ function goProfile() {
   router.push({ name: 'profile' })
 }
 
+/* 进入自走棋对局 */
+function goGame() {
+  router.push({ name: 'game' })
+}
+
 /* 进后台管理系统（图鉴数据管理）；未登录后台会先落到后台登录页 */
 function goAdmin() {
   router.push({ name: 'adminLogin' })
@@ -362,6 +367,7 @@ function openTraitByName(name) {
       </ul>
 
       <div class="acts">
+        <button class="btn-play" @click="goGame">开始游戏</button>
         <button class="btn-ghost" @click="goProfile">个人中心</button>
         <button v-if="isAdmin" class="btn-admin" @click="goAdmin">后台管理</button>
         <button class="btn-quit" @click="onLogout">退出登录</button>
@@ -782,6 +788,33 @@ function openTraitByName(name) {
   font-weight: 700;
   cursor: pointer;
   transition: all 0.2s;
+}
+
+/* 开始游戏：主行动按钮，金色发光实心 */
+.btn-play {
+  padding: 9px 22px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  cursor: pointer;
+  color: #1a1408;
+  background: linear-gradient(180deg, #ffe08a, var(--gold-1) 45%, var(--gold-3));
+  border: 1px solid transparent;
+  box-shadow: 0 6px 20px rgba(247, 215, 116, 0.4), 0 0 0 1px rgba(247, 215, 116, 0.2) inset;
+  transition: all 0.2s;
+  animation: play-pulse 2s ease-in-out infinite;
+}
+
+.btn-play:hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 28px rgba(247, 215, 116, 0.55);
+}
+
+@keyframes play-pulse {
+  0%, 100% { box-shadow: 0 6px 20px rgba(247, 215, 116, 0.4); }
+  50% { box-shadow: 0 6px 26px rgba(247, 215, 116, 0.65); }
 }
 
 .btn-ghost {

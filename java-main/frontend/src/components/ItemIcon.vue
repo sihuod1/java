@@ -1,19 +1,38 @@
 <script setup>
+import { computed } from 'vue'
+import { itemPhoto } from '../data/itemImages'
 import ItemShape from './ItemShape.vue'
 
 // 装备图标：
-// - 基础散件：单独图形
-// - 合成装备：六边形底 + 「散件A + 散件B」的配方，一眼看出由什么合成
+// - 优先显示金铲铲官方真实图标（assets/items/，按名字匹配）
+// - 没有对应图片的装备回退为 SVG 图形（基础散件单独图形 / 合成装备六边形底 + 配方）
 const props = defineProps({
   name: { type: String, required: true },
   type: { type: String, default: '基础' },
   recipe: { type: Array, default: () => [] },
   size: { type: Number, default: 34 }
 })
+
+const photo = computed(() => itemPhoto(props.name))
 </script>
 
 <template>
+  <!-- 金铲铲官方真实图标 -->
+  <img
+    v-if="photo"
+    class="item-photo"
+    :class="{ merged: type === '合成' }"
+    :src="photo"
+    :alt="name"
+    :width="size"
+    :height="size"
+    loading="lazy"
+    draggable="false"
+  />
+
+  <!-- SVG 回退 -->
   <svg
+    v-else
     class="item-icon"
     :class="{ merged: type === '合成' }"
     :width="size"
@@ -39,6 +58,14 @@ const props = defineProps({
 </template>
 
 <style scoped>
+.item-photo {
+  display: block;
+  flex: 0 0 auto;
+  object-fit: contain;
+  border-radius: 6px;
+  filter: drop-shadow(0 3px 8px rgba(247, 215, 116, 0.28));
+}
+
 .item-icon {
   display: block;
   flex: 0 0 auto;

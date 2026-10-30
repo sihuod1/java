@@ -5,6 +5,7 @@ import LandingView from '../views/LandingView.vue'
 import LoginView from '../views/LoginView.vue'
 import RegisterView from '../views/RegisterView.vue'
 import HomeView from '../views/HomeView.vue'
+import GameView from '../views/GameView.vue'
 import ProfileView from '../views/ProfileView.vue'
 import AdminLoginView from '../views/AdminLoginView.vue'
 import AdminView from '../views/AdminView.vue'
@@ -29,6 +30,12 @@ const routes = [
     name: 'home',
     component: HomeView,
     meta: { title: '主页', requiresAuth: true }
+  },
+  {
+    path: '/game',
+    name: 'game',
+    component: GameView,
+    meta: { title: '开始游戏', requiresAuth: true }
   },
   {
     path: '/profile',
