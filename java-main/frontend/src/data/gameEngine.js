@@ -37,10 +37,11 @@ function randomChampByCost(cost) {
 }
 
 /* 生成一个初始玩家状态 */
-export function createPlayer(isAI = false, name = '召唤师') {
+export function createPlayer(isAI = false, name = '召唤师', avatar = null) {
   return {
     name,
     isAI,
+    avatar,             // 头像（对手栏展示用）
     hp: 100,
     gold: isAI ? 10 : 10,
     level: isAI ? 3 : 1,
@@ -92,25 +93,44 @@ function computeStats(unit, traitBonuses) {
 }
 
 function applyItemStats(s, itemId) {
+  // 散件（按首页装备名判断）
   const bi = BASE_ITEMS.find(x => x.id === itemId)
   if (bi) {
-    if (bi.id === 'xuantie') s.atk += 15
-    if (bi.id === 'lingyu') s.atkSpeed += 0.15
-    if (bi.id === 'yusui') { /* 法强加成在技能计算时处理 */ }
-    if (bi.id === 'youquan') { s.manaMax -= 5; if (s.manaMax < 10) s.manaMax = 10 }
-    if (bi.id === 'xuanjia') s.armor += 20
-    if (bi.id === 'jiaoren') s.mr += 20
-    if (bi.id === 'lingmi') { s.maxHp += 150 }
-    if (bi.id === 'chisha') { /* 暴击加成 */ }
+    switch (bi.name) {
+      case '暴风大剑': s.atk += 15; break
+      case '反曲之弓': s.atkSpeed += 0.15; break
+      case '无用大棒': s.ap = (s.ap || 0) + 15; break            // 法强
+      case '女神之泪': s.manaMax += 15; break                    // 法力
+      case '锁子甲': s.armor += 25; break
+      case '负极斗篷': s.mr += 25; break
+      case '巨人腰带': s.maxHp += 200; break
+      case '拳套': s.critRate = (s.critRate || 0) + 0.1; break   // 暴击率
+      case '金铲铲': break                                      // 转职徽章，无属性
+    }
     return
   }
+  // 成装
   const fi = FULL_ITEMS.find(x => x.id === itemId)
   if (fi) {
-    if (fi.id === 'kuangtu') s.maxHp += 400
-    if (fi.id === 'jijing') s.armor += 45
-    if (fi.id === 'longzhua') s.mr += 45
-    if (fi.id === 'jiying') { s.atkSpeed += 0.45; s.range += 1 }
-    if (fi.id === 'shouhu') s.maxHp += 200
+    switch (fi.name) {
+      case '死亡之刃': s.atk += 30; break
+      case '疾射火炮': s.atkSpeed += 0.3; s.range += 1; break
+      case '灭世者的死亡之帽': s.ap = (s.ap || 0) + 45; break
+      case '蓝霸符': s.manaMax += 30; break
+      case '荆棘之甲': s.armor += 50; break
+      case '龙爪': s.mr += 50; break
+      case '狂徒铠甲': s.maxHp += 400; break
+      case '窃贼手套': s.critRate = (s.critRate || 0) + 0.2; break
+      case '巨人杀手': s.atk += 15; s.atkSpeed += 0.15; break
+      case '海克斯科技枪刃': s.atk += 15; s.ap = (s.ap || 0) + 15; break
+      case '守护天使': s.atk += 15; s.armor += 25; break
+      case '饮血剑': s.atk += 15; s.mr += 25; break
+      case '鬼索的狂暴之刃': s.atkSpeed += 0.15; s.ap = (s.ap || 0) + 15; break
+      case '莫雷洛秘典': s.ap = (s.ap || 0) + 15; s.maxHp += 200; break
+      case '石像鬼板甲': s.ap = (s.ap || 0) + 15; s.armor += 25; break
+      case '大天使之杖': s.ap = (s.ap || 0) + 15; s.manaMax += 15; break
+      case '剑士徽章': case '游侠徽章': case '法师徽章': break  // 转职徽章，无战斗属性
+    }
   }
 }
 
@@ -177,18 +197,110 @@ export function simulateFight(attacker, defender) {
   // 计算存活单位数（用于扣血）
   const aSurvive = Math.max(1, Math.round(aUnits.length * (aWin ? 1 : 0.4)))
   const dSurvive = Math.max(1, Math.round(dUnits.length * (aWin ? 0.4 : 1)))
+
+  // 生成战斗过程事件序列（用于前端逐帧动画回放）
+  const events = buildFightEvents(aUnits, dUnits, aWin)
+
   return {
     aWin,
     aSurvive,
     dSurvive,
     aUnits: aUnits.length,
-    dUnits: dUnits.length
+    dUnits: dUnits.length,
+    // 供动画展示的双方阵容明细（含属性 + 头像）
+    roster: {
+      ally: aUnits.map(u => ({ name: u.name, cost: u.champId ? costOf(u.champId) : 1, star: u.star, hp: u.maxHp, atk: u.atk, avatar: u.avatar })),
+      enemy: dUnits.map(u => ({ name: u.name, cost: u.champId ? costOf(u.champId) : 1, star: u.star, hp: u.maxHp, atk: u.atk, avatar: u.avatar }))
+    },
+    events
   }
+}
+
+function costOf(champId) {
+  const c = CHAMPIONS.find(x => x.id === champId)
+  return c ? c.cost : 1
+}
+
+/* 依据战力胜负，编排一场真实的逐帧攻防事件序列（用于前端动画回放） */
+function buildFightEvents(aUnits, dUnits, aWin) {
+  const events = []
+  // 建立带实时血量的战斗单位（拷贝，避免污染原数据）
+  const aAlive = aUnits.map(u => ({ name: u.name, cost: u.champId ? costOf(u.champId) : 1, hp: u.maxHp, maxHp: u.maxHp, atk: u.atk }))
+  const dAlive = dUnits.map(u => ({ name: u.name, cost: u.champId ? costOf(u.champId) : 1, hp: u.maxHp, maxHp: u.maxHp, atk: u.atk }))
+
+  const aliveIdx = (list) => {
+    const idx = []
+    list.forEach((u, i) => { if (u.hp > 0) idx.push(i) })
+    return idx
+  }
+
+  // 攻击动作：从 attacking 列表随机选一个存活者，攻击 defending 列表随机存活者
+  function doAttack(attacking, defending, atkSide, defSide) {
+    const atkIdxArr = aliveIdx(attacking)
+    const defIdxArr = aliveIdx(defending)
+    if (atkIdxArr.length === 0 || defIdxArr.length === 0) return false
+    const ai = atkIdxArr[Math.floor(Math.random() * atkIdxArr.length)]
+    const di = defIdxArr[Math.floor(Math.random() * defIdxArr.length)]
+    const atk = attacking[ai]
+    const def = defending[di]
+    const crit = Math.random() < 0.18
+    // 放大伤害，让战斗在合理事件数内结束（约 12~20 个事件）
+    const dmg = Math.max(1, Math.round(atk.atk * (1.6 + Math.random() * 1.2) * (crit ? 2.0 : 1)))
+    def.hp -= dmg
+    if (def.hp <= 0) def.hp = 0
+    events.push({
+      atkSide, defSide,
+      atkIdx: ai, defIdx: di,
+      atkName: atk.name, defName: def.name,
+      dmg, crit, kill: def.hp <= 0
+    })
+    return true
+  }
+
+  // 回合制对砍，最多 40 个动作，直到一方全灭
+  let guard = 0
+  while (guard++ < 40) {
+    const aIdx = aliveIdx(aAlive)
+    const dIdx = aliveIdx(dAlive)
+    if (aIdx.length === 0 || dIdx.length === 0) break
+
+    // 战力强的一方先手，随后弱方反击；交替进行
+    if (aWin) {
+      if (!doAttack(aAlive, dAlive, 'ally', 'enemy')) break
+      if (!doAttack(dAlive, aAlive, 'enemy', 'ally')) break
+    } else {
+      if (!doAttack(dAlive, aAlive, 'enemy', 'ally')) break
+      if (!doAttack(aAlive, dAlive, 'ally', 'enemy')) break
+    }
+  }
+
+  // 确保结果与战力判定一致：强方存活、弱方全灭
+  const winnerList = aWin ? aAlive : dAlive
+  const loserList = aWin ? dAlive : aAlive
+  const winnerSide = aWin ? 'ally' : 'enemy'
+  const loserSide = aWin ? 'enemy' : 'ally'
+  // 若弱方还有存活（理论上战力判定会赢），补刀清场
+  const loserAlive = aliveIdx(loserList)
+  const winnerAlive = aliveIdx(winnerList)
+  for (const li of loserAlive) {
+    if (winnerAlive.length === 0) break
+    const wi = winnerAlive[Math.floor(Math.random() * winnerAlive.length)]
+    const dmg = Math.max(1, loserList[li].hp)
+    loserList[li].hp = 0
+    events.push({
+      atkSide: winnerSide, defSide: loserSide,
+      atkIdx: wi, defIdx: li,
+      atkName: winnerList[wi].name, defName: loserList[li].name,
+      dmg, crit: false, kill: true
+    })
+  }
+
+  return events
 }
 
 function makeBattleUnit(u, bonuses) {
   const stats = computeStats(u, bonuses)
-  return { name: u.champ.name, star: u.star, hp: stats.hp, maxHp: stats.maxHp, atk: stats.atk, atkSpeed: stats.atkSpeed, armor: stats.armor, mr: stats.mr, mana: stats.mana, manaMax: stats.manaMax, range: stats.range, skill: u.champ.skill, champId: u.champ.id }
+  return { name: u.champ.name, star: u.star, hp: stats.hp, maxHp: stats.maxHp, atk: stats.atk, atkSpeed: stats.atkSpeed, armor: stats.armor, mr: stats.mr, mana: stats.mana, manaMax: stats.manaMax, range: stats.range, skill: u.champ.skill, champId: u.champ.id, avatar: u.champ.avatar || null }
 }
 
 /* ---------- 对局管理 ---------- */
@@ -197,12 +309,14 @@ export class Game {
     this.player = createPlayer(false, playerName)
     this.ais = []
     for (let i = 0; i < 7; i++) {
-      this.ais.push(createPlayer(true, '对手' + (i + 1)))
+      const champ = CHAMPIONS[i % CHAMPIONS.length]
+      this.ais.push(createPlayer(true, '玩家' + (i + 1), champ.avatar || null))
     }
     this.round = 1       // 当前回合
     this.phase = 'shop'  // shop | fight | carousel | rune
     this.logs = []
     this.selectedRunes = [] // 当前待选符文
+    this.currentEnemy = null // 本回合随机到的对手（战斗结算时记录）
     this.player.board.push(makeUnit(pick(CHAMPIONS).id, 1))
   }
 
@@ -259,26 +373,34 @@ export class Game {
 
   addToBench(champId) {
     const p = this.player
-    const bench = p.bench
-    // 找已有同 id 且星级<3 的单位
-    const same = bench.filter(u => u.champ.id === champId && u.star < 3)
-    if (same.length >= 2) {
-      // 三合一升星
-      const base = same[0]
-      base.star += 1
-      // 移除另外两个
-      let removed = 0
-      p.bench = bench.filter(u => {
-        if (u.champ.id === champId && u.star === base.star - 1 && removed < 2) {
-          removed++
-          return false
-        }
-        return true
-      })
-      this.log(`合成 ${base.champ.name} ${base.star} 星！`)
-      return
-    }
+    // 先把新买的一星单位放进去
     p.bench.push(makeUnit(champId, 1))
+    // 反复合成：同 id 且同星级的单位满 3 个就升 1 星
+    let merged = true
+    while (merged) {
+      merged = false
+      for (let star = 1; star < 3; star++) {
+        // 找该 id 该星级的所有单位
+        const group = p.bench.filter(u => u.champ.id === champId && u.star === star)
+        if (group.length >= 3) {
+          // 3 个同星 → 1 个更高一星（升到 star+1）
+          const base = group[0]
+          base.star = star + 1
+          // 移除这 3 个同星中的另外 2 个
+          let removed = 0
+          p.bench = p.bench.filter(u => {
+            if (u.champ.id === champId && u.star === star && removed < 2) {
+              removed++
+              return false
+            }
+            return true
+          })
+          this.log(`合成 ${base.champ.name} ${base.star} 星！（3 个 ${star} 星）`)
+          merged = true
+          break
+        }
+      }
+    }
   }
 
   sellBench(index) {
@@ -339,41 +461,218 @@ export class Game {
     return fi || null
   }
 
+  /* 在背包里合成：点两个散件 → 合成成装（成装进入背包） */
+  combineTwoInBag(i1, i2) {
+    const p = this.player
+    const a = p.baseItems[i1]
+    const b = p.baseItems[i2]
+    if (!a || !b) return null
+    if (i1 === i2) { this.log('请选择两个不同的散件'); return null }
+    // 两个散件（名字）合成
+    const fi = this.combineItems(a.id, b.id)
+    if (!fi) { this.log(`「${a.name}」和「${b.name}」无法合成`); return null }
+    // 从背包移除两个散件（先删索引大的，避免错位）
+    const hi = Math.max(i1, i2)
+    const lo = Math.min(i1, i2)
+    p.baseItems.splice(hi, 1)
+    p.baseItems.splice(lo, 1)
+    // 成装进入背包
+    p.baseItems.push({ id: fi.id })
+    this.log(`合成成品「${fi.name}」！${fi.desc}`)
+    return fi
+  }
+
+  /* 判断是否野怪回合（金铲铲规则：开局前3回合 + 之后每5回合一次） */
+  isMonsterRound() {
+    const r = this.round
+    return r <= 3 || (r > 3 && r % 5 === 1)
+  }
+
+  /* 野怪回合掉落散件 */
+  dropItem() {
+    const p = this.player
+    if (p.baseItems.length >= 12) { this.log('散件背包已满'); return null }
+    const item = BASE_ITEMS[rand(BASE_ITEMS.length)]
+    p.baseItems.push({ id: item.id })
+    this.log(`野怪掉落散件「${item.name}」（${item.stat}）`)
+    return item
+  }
+
+  /* 给棋盘上的单位佩戴装备（散件或成装），最多 3 件 */
+  equipItem(itemIndex, boardIndex) {
+    const p = this.player
+    const item = p.baseItems[itemIndex]
+    const unit = p.board[boardIndex]
+    if (!item) { this.log('没有该装备'); return false }
+    if (!unit) { this.log('该位置没有单位'); return false }
+    if (unit.items.length >= 3) { this.log(`${unit.champ.name} 已满 3 件装备`); return false }
+
+    p.baseItems.splice(itemIndex, 1)
+    unit.items.push(item.id)
+    const detail = BASE_ITEMS.find(x => x.id === item.id) || FULL_ITEMS.find(x => x.id === item.id)
+    this.log(`为 ${unit.champ.name} 佩戴「${detail ? detail.name : item.id}」`)
+    return true
+  }
+
+  /* 取下单位身上的装备（回到散件背包，成装拆回两件散件） */
+  unequipItem(boardIndex, itemId) {
+    const p = this.player
+    const unit = p.board[boardIndex]
+    if (!unit) return false
+    const idx = unit.items.indexOf(itemId)
+    if (idx < 0) return false
+    unit.items.splice(idx, 1)
+
+    // 判断是成装还是散件
+    const fi = FULL_ITEMS.find(x => x.id === itemId)
+    if (fi) {
+      // 成装拆回两件散件
+      p.baseItems.push({ id: fi.a }, { id: fi.b })
+      this.log(`拆解「${fi.name}」为两件散件`)
+    } else {
+      p.baseItems.push({ id: itemId })
+      this.log(`取下装备`)
+    }
+    return true
+  }
+
   /* 进入战斗阶段 */
   fight() {
     const p = this.player
-    // 随机选一个 AI 对手
-    const aliveAIs = this.ais.filter(a => a.alive)
-    const enemy = aliveAIs[rand(aliveAIs.length)]
-    if (!enemy) return { over: true, winner: true }
 
-    // AI 自动组建队伍
-    this.autoBuildAI(enemy)
-
-    const result = simulateFight(p, enemy)
-    // 结算
-    if (result.aWin) {
-      const dmg = result.aSurvive + this.player.level
-      enemy.hp -= dmg
-      this.player.lastFight = 'win'
-      this.log(`回合 ${this.round}：战胜 ${enemy.name}，对其造成 ${dmg} 伤害`)
-    } else {
-      const dmg = result.dSurvive + enemy.level
-      p.hp -= dmg
-      this.player.lastFight = 'lose'
-      this.log(`回合 ${this.round}：战败，损失 ${dmg} 生命`)
+    // 野怪回合：打野怪（弱阵容），胜利掉落散件，不扣 AI 血量
+    if (this.isMonsterRound()) {
+      return this.fightMonster()
     }
 
-    // 检查淘汰
-    if (enemy.hp <= 0) { enemy.alive = false; enemy.hp = 0 }
+    // 收集所有存活参战者：玩家 + 7 个人机
+    const fighters = [
+      { player: p, name: p.name, isAI: false },
+      ...this.ais.filter(a => a.alive).map(a => ({ player: a, name: a.name, isAI: true }))
+    ]
+    if (fighters.length === 0) return { over: true, winner: true }
+    if (fighters.length === 1) {
+      // 只剩玩家一个 → 吃鸡
+      return { over: true, winner: true }
+    }
+
+    // 按血量从高到低排序，两两配对
+    fighters.sort((x, y) => y.player.hp - x.player.hp)
+
+    // 记录本回合玩家对局结果（用于动画展示）
+    let playerResult = null
+
+    // 两两配对战斗（血量高 vs 血量低）
+    const pairs = []
+    for (let i = 0; i + 1 < fighters.length; i += 2) {
+      pairs.push([fighters[i], fighters[i + 1]])
+    }
+    // 奇数个 → 最后一名轮空
+    const bye = fighters.length % 2 === 1 ? fighters[fighters.length - 1] : null
+    if (bye) this.log(`回合 ${this.round}：${bye.name} 轮空`)
+
+    // 逐对战斗并结算
+    for (const [a, b] of pairs) {
+      // AI 自动组建队伍
+      if (a.isAI) this.autoBuildAI(a.player)
+      if (b.isAI) this.autoBuildAI(b.player)
+
+      const result = simulateFight(a.player, b.player)
+
+      // 结算血量
+      if (result.aWin) {
+        const dmg = result.aSurvive + a.player.level
+        b.player.hp -= dmg
+        a.player.lastFight = 'win'
+        b.player.lastFight = 'lose'
+        this.log(`回合 ${this.round}：${a.name} 战胜 ${b.name}（-${dmg}）`)
+      } else {
+        const dmg = result.dSurvive + b.player.level
+        a.player.hp -= dmg
+        a.player.lastFight = 'lose'
+        b.player.lastFight = 'win'
+        this.log(`回合 ${this.round}：${b.name} 战胜 ${a.name}（-${dmg}）`)
+      }
+
+      // 若这对里包含玩家，记录玩家对局结果（含阵容用于动画）
+      if (!a.isAI || !b.isAI) {
+        const isPlayerA = !a.isAI
+        const allyPlayer = isPlayerA ? a.player : b.player
+        const enemyPlayer = isPlayerA ? b.player : a.player
+        const allyWon = isPlayerA ? result.aWin : !result.aWin
+        // 将结果转成「我方视角」的 roster/events
+        playerResult = {
+          aWin: allyWon,
+          result: {
+            ...result,
+            aWin: allyWon,
+            roster: allyWon ? result.roster : { ally: result.roster.enemy, enemy: result.roster.ally },
+            enemy: { name: enemyPlayer.name, hp: enemyPlayer.hp, level: enemyPlayer.level }
+          }
+        }
+      }
+    }
+
+    // 标记淘汰（血量 <= 0）
+    for (const f of fighters) {
+      if (f.player.hp <= 0 && f.player !== p) {
+        f.player.alive = false
+        f.player.hp = 0
+        this.log(`${f.name} 出局！`)
+      }
+    }
+
+    // 判断玩家是否出局 / 吃鸡
+    if (p.hp <= 0) {
+      p.alive = false
+      p.hp = 0
+      return { over: true, winner: false, result: playerResult ? playerResult.result : null }
+    }
+    const aliveCount = this.ais.filter(a => a.alive).length
+    if (aliveCount === 0) {
+      return { over: true, winner: true, result: playerResult ? playerResult.result : null }
+    }
+
+    // 更新 currentEnemy 为下一回合排序后的首个对手（血量最高者）
+    const nextAlive = this.ais.filter(a => a.alive).sort((x, y) => y.hp - x.hp)
+    this.currentEnemy = nextAlive[0] || null
+
+    this.round += 1
+    this.startRound()
+    return { over: false, result: playerResult ? playerResult.result : null }
+  }
+
+  /* 野怪回合：打野怪，胜利掉落散件 */
+  fightMonster() {
+    const p = this.player
+    // 生成野怪：弱阵容（1-2 个 1 费单位），保证玩家初始能打
+    const monster = createPlayer(true, '野怪', null)
+    monster.level = 1
+    const count = this.round <= 2 ? 1 : 2
+    for (let i = 0; i < count; i++) {
+      const c = randomChampByCost(1)
+      monster.board.push(makeUnit(c.id, 1))
+    }
+    this.currentEnemy = monster
+
+    const result = simulateFight(p, monster)
+    result.enemy = { name: '野怪', hp: 0, level: 1, monster: true }
+
+    if (result.aWin) {
+      this.player.lastFight = 'win'
+      this.log(`回合 ${this.round}：战胜野怪`)
+      this.dropItem()
+    } else {
+      // 野怪回合失败不扣太多血（保底体验）
+      const dmg = Math.max(1, result.dSurvive)
+      p.hp -= dmg
+      this.player.lastFight = 'lose'
+      this.log(`回合 ${this.round}：被野怪击败，损失 ${dmg} 生命`)
+    }
+
     if (p.hp <= 0) {
       p.alive = false
       return { over: true, winner: false, result }
-    }
-    // 检查是否吃鸡
-    const aliveCount = this.ais.filter(a => a.alive).length
-    if (aliveCount === 0) {
-      return { over: true, winner: true, result }
     }
 
     this.round += 1
@@ -383,21 +682,25 @@ export class Game {
 
   /* AI 自动组建队伍 */
   autoBuildAI(ai) {
-    // 简化的 AI：按人口随机上阵
+    // 每回合 AI 获得经济（基础 + 少量成长），用于买棋子
+    ai.gold += 5 + Math.min(ai.level, 5)
+
+    // 先买棋子填满备战席（保证有单位可上阵）
+    while (ai.bench.length < 9 && ai.gold >= 2) {
+      const c = randomChampByCost(rand(Math.max(ai.level, 1)) + 1)
+      if (!c) break
+      ai.gold -= c.cost
+      ai.bench.push(makeUnit(c.id, 1))
+    }
+
+    // 上阵到棋盘，直到达到人口上限或备战席空
     const target = Math.min(ai.level, ai.board.length + ai.bench.length)
     while (ai.board.length < target && ai.bench.length > 0) {
       ai.board.push(ai.bench.shift())
     }
-    // 每回合 AI 买点棋子
-    const budget = Math.min(ai.gold, 10)
-    ai.gold -= budget
-    for (let i = 0; i < Math.floor(budget / 2); i++) {
-      const c = randomChampByCost(rand(ai.level) + 1)
-      if (ai.bench.length < 9) ai.bench.push(makeUnit(c.id, 1))
-    }
-    // 人口成长
-    if (ai.gold > 20 && ai.level < 9 && Math.random() < 0.5) {
-      ai.gold -= 4
+
+    // 人口成长（后期随回合变强）
+    if (ai.level < 9 && Math.random() < 0.6) {
       ai.level += 1
     }
   }
