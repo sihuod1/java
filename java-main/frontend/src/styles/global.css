@@ -40,6 +40,14 @@ body {
   position: relative;
 }
 
+/* 游戏页（GameView 挂载时给 body 加 game-lock）：锁定一屏，禁止整页滚动 */
+body.game-lock {
+  height: 100vh;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
 /* 漂浮的金色光点 */
 .stars {
   position: absolute;

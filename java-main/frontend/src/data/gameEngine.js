@@ -318,6 +318,11 @@ export class Game {
     this.selectedRunes = [] // 当前待选符文
     this.currentEnemy = null // 本回合随机到的对手（战斗结算时记录）
     this.player.board.push(makeUnit(pick(CHAMPIONS).id, 1))
+
+    // 开局赠送一对可合成的散件，让玩家立即体验「合成成装」
+    // 暴风大剑 + 反曲之弓 → 巨人杀手（异名合成，直观演示合成机制）
+    this.player.baseItems.push({ id: '暴风大剑' }, { id: '反曲之弓' })
+    this.log('开局赠送散件「暴风大剑」「反曲之弓」，点击背包中的两件散件即可合成「巨人杀手」')
   }
 
   /* 开始新回合：发利息、刷商店 */
@@ -482,6 +487,18 @@ export class Game {
     return fi
   }
 
+  /* 获取某散件能合成的所有成装（用于合成图鉴提示） */
+  combosOfBase(baseId) {
+    const combos = []
+    for (const fi of FULL_ITEMS) {
+      if (fi.a === baseId || fi.b === baseId) {
+        const other = fi.a === baseId ? fi.b : fi.a
+        combos.push({ full: fi, other })
+      }
+    }
+    return combos
+  }
+
   /* 判断是否野怪回合（金铲铲规则：开局前3回合 + 之后每5回合一次） */
   isMonsterRound() {
     const r = this.round
@@ -510,8 +527,9 @@ export class Game {
     p.baseItems.splice(itemIndex, 1)
     unit.items.push(item.id)
     const detail = BASE_ITEMS.find(x => x.id === item.id) || FULL_ITEMS.find(x => x.id === item.id)
-    this.log(`为 ${unit.champ.name} 佩戴「${detail ? detail.name : item.id}」`)
-    return true
+    this.log(`为 ${unit.champ.name} 佩戴「${detail ? detail.name : item.id}」${detail && detail.stat ? '（' + detail.stat + '）' : ''}`)
+    // 返回佩戴结果信息，供前端提示
+    return { ok: true, unitName: unit.champ.name, itemName: detail ? detail.name : item.id, stat: detail ? detail.stat : '' }
   }
 
   /* 取下单位身上的装备（回到散件背包，成装拆回两件散件） */

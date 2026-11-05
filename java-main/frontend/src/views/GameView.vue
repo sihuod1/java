@@ -280,9 +280,24 @@ function starText(u) {
 /* ---------- 装备相关 ---------- */
 const selectedItemIdx = ref(-1)  // 当前选中要操作的装备索引（-1 未选）
 
+/* 合成成功弹窗 */
+const combineToast = ref(null)   // { fullName, stat, desc, img }
+/* 佩戴成功提示 */
+const equipToast = ref(null)     // { unitName, itemName, stat }
+
 function itemById(id) {
   return BASE_ITEMS.find(x => x.id === id) || FULL_ITEMS.find(x => x.id === id)
 }
+
+/* 选中散件时，可合成的成装图鉴（用于引导提示） */
+const selectedCombos = computed(() => {
+  if (selectedItemIdx.value < 0 || !game.value) return []
+  const it = player.baseItems[selectedItemIdx.value]
+  if (!it) return []
+  // 只有散件才有合成图鉴；成装/已佩戴散件没有
+  if (!isBaseItem(it)) return []
+  return game.value.combosOfBase(it.id)
+})
 
 /* 装备图片 */
 function itemImg(it) {
@@ -300,7 +315,11 @@ function onBoardClick(idx) {
   if (selectedItemIdx.value >= 0) {
     // 佩戴模式
     if (u) {
-      game.value.equipItem(selectedItemIdx.value, idx)
+      const r = game.value.equipItem(selectedItemIdx.value, idx)
+      if (r && r.ok) {
+        equipToast.value = { unitName: r.unitName, itemName: r.itemName, stat: r.stat }
+        setTimeout(() => { equipToast.value = null }, 2200)
+      }
       selectedItemIdx.value = -1
       syncPlayer()
     }
@@ -328,12 +347,13 @@ function selectItem(idx) {
   const b = player.baseItems[idx]
   if (a && b) {
     const fi = game.value.combineTwoInBag(selectedItemIdx.value, idx)
+    if (fi) {
+      // 合成成功：弹窗展示成装结果
+      combineToast.value = { fullName: fi.name, stat: fi.stat, desc: fi.desc, img: fi.img }
+      setTimeout(() => { combineToast.value = null }, 2600)
+    }
     selectedItemIdx.value = -1
     syncPlayer()
-    if (!fi) {
-      // 合成失败（两个散件不匹配），选中后点的那个
-      selectedItemIdx.value = -1
-    }
   }
 }
 
@@ -349,10 +369,13 @@ function unitItems(u) {
 }
 
 onMounted(() => {
+  // 游戏页锁定 body 一屏（禁用全局 body 的 padding 与滚动）
+  document.body.classList.add('game-lock')
   startGame()
 })
 
 onUnmounted(() => {
+  document.body.classList.remove('game-lock')
   clearBattle()
 })
 </script>
@@ -450,6 +473,27 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <!-- 合成成功弹窗 -->
+    <div v-if="combineToast" class="combine-toast-overlay">
+      <div class="combine-toast">
+        <div class="ct-icon">
+          <img v-if="combineToast.img" :src="combineToast.img" :alt="combineToast.fullName" />
+          <span v-else>{{ combineToast.fullName[0] }}</span>
+        </div>
+        <div class="ct-body">
+          <div class="ct-title">✨ 合成成功 · {{ combineToast.fullName }}</div>
+          <div class="ct-stat" v-if="combineToast.stat">{{ combineToast.stat }}</div>
+          <div class="ct-desc">{{ combineToast.desc }}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 佩戴成功提示 -->
+    <div v-if="equipToast" class="equip-toast">
+      <span class="et-icon">⚔</span>
+      <span>为 <b>{{ equipToast.unitName }}</b> 佩戴「{{ equipToast.itemName }}」{{ equipToast.stat ? '（' + equipToast.stat + '）' : '' }}</span>
+    </div>
+
     <!-- 符文选择遮罩 -->
     <div v-if="game && game.phase === 'rune'" class="overlay">
       <div class="over-card rune-card">
@@ -487,49 +531,147 @@ onUnmounted(() => {
       </div>
     </header>
 
-    <!-- 主区域 -->
-    <div class="main">
-      <!-- 棋盘 -->
-      <section class="board">
-        <div class="board-grid">
-          <div
-            v-for="(i, idx) in boardSlots"
-            :key="idx"
-            class="cell"
-            :class="{ empty: !player.board[idx], equipping: selectedItemIdx >= 0 }"
-            @click="onBoardClick(idx)"
-          >
-            <template v-if="player.board[idx]">
-              <div class="unit" :style="{ '--c': unitColor(player.board[idx]) }">
-                <img v-if="unitAvatar(player.board[idx])" class="unit-face" :src="unitAvatar(player.board[idx])" :alt="unitName(player.board[idx])" draggable="false" />
-                <span v-else class="unit-first">{{ unitFirstName(player.board[idx]) }}</span>
-                <span class="unit-star">{{ starText(player.board[idx]) }}</span>
-                <span class="unit-name">{{ unitName(player.board[idx]) }}</span>
-                <span class="unit-cost">{{ COST_LABEL[unitCost(player.board[idx])] }}</span>
-                <!-- 已装装备图标 -->
-                <span class="unit-items" v-if="unitItems(player.board[idx]).length">
-                  <span
-                    v-for="(it, ii) in unitItems(player.board[idx])"
-                    :key="ii"
-                    class="unit-item-icon"
-                    :title="it.name + '：' + (it.desc || it.stat)"
-                    @click.stop="unequip(idx, it.id)"
-                  >
-                    <img v-if="itemImg(it)" class="unit-item-img" :src="itemImg(it)" :alt="it.name" draggable="false" />
-                    <span v-else>{{ it.name[0] }}</span>
+    <!-- 左右两栏一屏布局 -->
+    <div class="cols">
+      <!-- 左栏：战场区（棋盘 + 备战席 + 商店） -->
+      <div class="col-left">
+        <!-- 棋盘 -->
+        <section class="board">
+          <div class="board-grid">
+            <div
+              v-for="(i, idx) in boardSlots"
+              :key="idx"
+              class="cell"
+              :class="{ empty: !player.board[idx], equipping: selectedItemIdx >= 0 }"
+              @click="onBoardClick(idx)"
+            >
+              <template v-if="player.board[idx]">
+                <div class="unit" :style="{ '--c': unitColor(player.board[idx]) }">
+                  <img v-if="unitAvatar(player.board[idx])" class="unit-face" :src="unitAvatar(player.board[idx])" :alt="unitName(player.board[idx])" draggable="false" />
+                  <span v-else class="unit-first">{{ unitFirstName(player.board[idx]) }}</span>
+                  <span class="unit-star">{{ starText(player.board[idx]) }}</span>
+                  <span class="unit-name">{{ unitName(player.board[idx]) }}</span>
+                  <span class="unit-cost">{{ COST_LABEL[unitCost(player.board[idx])] }}</span>
+                  <!-- 已装装备图标 -->
+                  <span class="unit-items" v-if="unitItems(player.board[idx]).length">
+                    <span
+                      v-for="(it, ii) in unitItems(player.board[idx])"
+                      :key="ii"
+                      class="unit-item-icon"
+                      :title="it.name + '：' + (it.desc || it.stat)"
+                      @click.stop="unequip(idx, it.id)"
+                    >
+                      <img v-if="itemImg(it)" class="unit-item-img" :src="itemImg(it)" :alt="it.name" draggable="false" />
+                      <span v-else>{{ it.name[0] }}</span>
+                    </span>
                   </span>
-                </span>
+                </div>
+              </template>
+              <template v-else>
+                <span class="cell-hint">空位</span>
+              </template>
+            </div>
+          </div>
+        </section>
+
+        <!-- 备战席 -->
+        <section class="bench">
+          <h3 class="shop-title">备战席 <span class="mini-hint">左键上阵 · 右键出售</span></h3>
+          <div class="bench-grid">
+            <div
+              v-for="(u, i) in player.bench"
+              :key="i"
+              class="bench-slot"
+              @click="deploy(i)"
+              @contextmenu.prevent="sell(i)"
+            >
+              <div class="unit" :style="{ '--c': unitColor(u) }">
+                <img v-if="unitAvatar(u)" class="unit-face" :src="unitAvatar(u)" :alt="unitName(u)" draggable="false" />
+                <span v-else class="unit-first">{{ unitFirstName(u) }}</span>
+                <span class="unit-star">{{ starText(u) }}</span>
+                <span class="unit-name">{{ unitName(u) }}</span>
+                <span class="unit-cost">{{ COST_LABEL[unitCost(u)] }}</span>
               </div>
-            </template>
-            <template v-else>
-              <span class="cell-hint">空位</span>
-            </template>
+            </div>
+            <div v-for="i in 9 - player.bench.length" :key="'e' + i" class="bench-slot empty-slot">
+              <span class="cell-hint">空</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- 商店 -->
+        <section class="shop">
+          <h3 class="shop-title">商店</h3>
+          <div class="shop-grid">
+            <div
+              v-for="(c, i) in shop"
+              :key="i"
+              class="shop-slot"
+              :class="{ sold: !c }"
+              @click="c && buy(i)"
+            >
+              <template v-if="c">
+                <div class="unit" :style="{ '--c': COST_COLOR[c.cost] }">
+                  <img v-if="c.avatar" class="unit-face" :src="c.avatar" :alt="c.name" draggable="false" />
+                  <span v-else class="unit-first">{{ c.name[0] }}</span>
+                  <span class="unit-name">{{ c.name }}</span>
+                  <span class="unit-cost">{{ COST_LABEL[c.cost] }}</span>
+                </div>
+                <span class="price">{{ c.cost }} 金币</span>
+              </template>
+              <template v-else>
+                <span class="sold-tag">已售</span>
+              </template>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- 右栏：信息操作区（羁绊 + 符文 + 玩家 + 装备 + 操作 + 战报） -->
+      <aside class="col-right">
+        <!-- 操作按钮（置顶，方便随时战斗） -->
+        <div class="panel actions">
+          <p v-if="currentEnemy" class="muted next-fight">⚔ 当前对战：<b>{{ currentEnemy }}</b></p>
+          <button class="btn-primary big" @click="fight">⚔ 开始战斗</button>
+          <div class="action-row">
+            <button class="btn-ghost" @click="refresh">🔄 D牌</button>
+            <button class="btn-ghost" @click="levelUp">⬆ 升级</button>
           </div>
         </div>
-      </section>
 
-      <!-- 右侧信息面板 -->
-      <aside class="side">
+        <!-- 散件背包 -->
+        <div class="panel">
+          <h3>装备背包（{{ player.baseItems.length }}/12）</h3>
+          <div v-if="player.baseItems.length" class="item-bag">
+            <div
+              v-for="(it, i) in player.baseItems"
+              :key="i"
+              class="item-bag-slot"
+              :class="{ selected: selectedItemIdx === i }"
+              :title="itemById(it.id).name + '：' + (itemById(it.id).desc || itemById(it.id).stat)"
+              @click="selectItem(i)"
+            >
+              <img v-if="itemImg(itemById(it.id))" class="item-bag-img" :src="itemImg(itemById(it.id))" :alt="itemById(it.id).name" draggable="false" />
+              <span v-else class="item-bag-icon">{{ itemById(it.id).name[0] }}</span>
+            </div>
+          </div>
+          <p v-else class="muted">暂无装备，野怪回合获胜可掉落散件</p>
+          <p v-if="selectedItemIdx >= 0" class="muted equip-hint">
+            已选中「{{ itemById(player.baseItems[selectedItemIdx].id).name }}」：
+            再点另一个散件合成成装，或点棋盘上的英雄佩戴
+          </p>
+          <!-- 合成图鉴：选中散件时显示可合成的成装 -->
+          <div v-if="selectedCombos.length" class="combo-guide">
+            <p class="combo-title">可合成：</p>
+            <div v-for="c in selectedCombos" :key="c.full.id" class="combo-row">
+              <span class="combo-formula">{{ itemById(player.baseItems[selectedItemIdx].id).name }} + {{ c.other }}</span>
+              <span class="combo-arrow">→</span>
+              <span class="combo-result">{{ c.full.name }}</span>
+              <span class="combo-stat">{{ c.full.stat }}</span>
+            </div>
+          </div>
+        </div>
+
         <!-- 激活羁绊 -->
         <div class="panel">
           <h3>激活羁绊</h3>
@@ -576,108 +718,27 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- 散件背包 -->
-        <div class="panel">
-          <h3>装备背包（{{ player.baseItems.length }}/12）</h3>
-          <div v-if="player.baseItems.length" class="item-bag">
-            <div
-              v-for="(it, i) in player.baseItems"
-              :key="i"
-              class="item-bag-slot"
-              :class="{ selected: selectedItemIdx === i }"
-              :title="itemById(it.id).name + '：' + (itemById(it.id).desc || itemById(it.id).stat)"
-              @click="selectItem(i)"
-            >
-              <img v-if="itemImg(itemById(it.id))" class="item-bag-img" :src="itemImg(itemById(it.id))" :alt="itemById(it.id).name" draggable="false" />
-              <span v-else class="item-bag-icon">{{ itemById(it.id).name[0] }}</span>
-            </div>
+        <!-- 战报 -->
+        <section class="logs panel">
+          <h3>战报</h3>
+          <div class="log-list">
+            <p v-for="(l, i) in logs" :key="i" class="log-line">{{ l }}</p>
           </div>
-          <p v-else class="muted">暂无装备，野怪回合获胜可掉落散件</p>
-          <p v-if="selectedItemIdx >= 0" class="muted equip-hint">
-            已选中「{{ itemById(player.baseItems[selectedItemIdx].id).name }}」：
-            再点另一个散件合成成装，或点棋盘上的英雄佩戴
-          </p>
-        </div>
-
-        <!-- 操作按钮 -->
-        <div class="panel actions">
-          <p v-if="currentEnemy" class="muted next-fight">⚔ 当前对战：<b>{{ currentEnemy }}</b></p>
-          <button class="btn-primary big" @click="fight">⚔ 开始战斗</button>
-          <div class="action-row">
-            <button class="btn-ghost" @click="refresh">🔄 D牌 (2金币)</button>
-            <button class="btn-ghost" @click="levelUp">⬆ 升级人口</button>
-          </div>
-        </div>
+        </section>
       </aside>
     </div>
-
-    <!-- 商店 -->
-    <section class="shop">
-      <h3 class="shop-title">商店</h3>
-      <div class="shop-grid">
-        <div
-          v-for="(c, i) in shop"
-          :key="i"
-          class="shop-slot"
-          :class="{ sold: !c }"
-          @click="c && buy(i)"
-        >
-          <template v-if="c">
-            <div class="unit" :style="{ '--c': COST_COLOR[c.cost] }">
-              <img v-if="c.avatar" class="unit-face" :src="c.avatar" :alt="c.name" draggable="false" />
-              <span v-else class="unit-first">{{ c.name[0] }}</span>
-              <span class="unit-name">{{ c.name }}</span>
-              <span class="unit-cost">{{ COST_LABEL[c.cost] }}</span>
-            </div>
-            <span class="price">{{ c.cost }} 金币</span>
-          </template>
-          <template v-else>
-            <span class="sold-tag">已售</span>
-          </template>
-        </div>
-      </div>
-    </section>
-
-    <!-- 备战席 -->
-    <section class="bench">
-      <h3 class="shop-title">备战席 (点击上阵)</h3>
-      <div class="bench-grid">
-        <div
-          v-for="(u, i) in player.bench"
-          :key="i"
-          class="bench-slot"
-          @click="deploy(i)"
-          @contextmenu.prevent="sell(i)"
-        >
-          <div class="unit" :style="{ '--c': unitColor(u) }">
-            <img v-if="unitAvatar(u)" class="unit-face" :src="unitAvatar(u)" :alt="unitName(u)" draggable="false" />
-            <span v-else class="unit-first">{{ unitFirstName(u) }}</span>
-            <span class="unit-star">{{ starText(u) }}</span>
-            <span class="unit-name">{{ unitName(u) }}</span>
-            <span class="unit-cost">{{ COST_LABEL[unitCost(u)] }}</span>
-          </div>
-        </div>
-        <div v-for="i in 9 - player.bench.length" :key="'e' + i" class="bench-slot empty-slot">
-          <span class="cell-hint">空</span>
-        </div>
-      </div>
-      <p class="muted hint">左键上阵 · 右键出售</p>
-    </section>
-
-    <!-- 日志 -->
-    <section class="logs">
-      <h3 class="shop-title">战报</h3>
-      <div class="log-list">
-        <p v-for="(l, i) in logs" :key="i" class="log-line">{{ l }}</p>
-      </div>
-    </section>
   </div>
 </template>
 
 <style scoped>
 .game {
-  min-height: 100vh;
-  padding: 16px 20px 40px;
+  /* 固定铺满视口：脱离 body 的 flex 居中流，避免 body padding 产生整页滚动 */
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 14px;
   background:
     radial-gradient(ellipse at 50% -10%, rgba(240, 200, 120, 0.28), transparent 55%),
     radial-gradient(ellipse at 15% 20%, rgba(216, 180, 106, 0.14), transparent 45%),
@@ -685,6 +746,32 @@ onUnmounted(() => {
     linear-gradient(180deg, #241a0c 0%, #1a1408 45%, #120d06 100%);
   color: #f3e9cf;
   font-family: 'Noto Serif SC', 'Songti SC', 'SimSun', serif;
+  box-sizing: border-box;
+}
+
+/* ============ 左右两栏一屏布局 ============ */
+.cols {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 14px;
+}
+.col-left {
+  flex: 1 1 62%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+}
+.col-right {
+  flex: 1 1 38%;
+  min-width: 320px;
+  max-width: 460px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
 }
 
 /* 遮罩 */
@@ -810,12 +897,13 @@ onUnmounted(() => {
 .topbar {
   display: flex;
   align-items: center;
-  gap: 20px;
-  padding: 12px 16px;
-  border-radius: 14px;
+  gap: 16px;
+  padding: 10px 14px;
+  border-radius: 12px;
   background: rgba(46, 35, 17, 0.9);
   border: 1px solid rgba(216, 180, 106, 0.3);
-  margin-bottom: 16px;
+  margin-bottom: 10px;
+  flex: 0 0 auto;
 }
 .t-left {
   display: flex;
@@ -869,35 +957,36 @@ onUnmounted(() => {
   color: #6fc9a4;
 }
 
-/* 主区 */
-.main {
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
-}
+/* 主区（旧版 .main 已改为 .cols 左右两栏） */
 .board {
-  flex: 1;
-  min-height: 320px;
-  border-radius: 16px;
-  padding: 16px;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  padding: 12px;
   background: linear-gradient(180deg, rgba(58, 44, 20, 0.65), rgba(36, 27, 12, 0.72));
   border: 1px solid rgba(216, 180, 106, 0.28);
   box-shadow: inset 0 0 40px rgba(216, 180, 106, 0.08);
 }
 .board-grid {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
+  grid-auto-rows: minmax(72px, 1fr);
+  gap: 8px;
+  align-content: stretch;
 }
 .cell {
-  aspect-ratio: 1;
-  border-radius: 12px;
+  border-radius: 10px;
   display: grid;
   place-items: center;
   cursor: pointer;
   background: rgba(216, 180, 106, 0.05);
   border: 1px dashed rgba(216, 180, 106, 0.28);
   transition: all 0.2s;
+  min-height: 0;
 }
 .cell:not(.empty):hover {
   border-color: #e74c3c;
@@ -906,18 +995,12 @@ onUnmounted(() => {
   font-size: 12px;
   color: #5a5f70;
 }
-
-.side {
-  width: 300px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
 .panel {
-  padding: 14px 16px;
+  padding: 12px 14px;
   border-radius: 14px;
   background: rgba(42, 33, 18, 0.7);
   border: 1px solid rgba(216, 180, 106, 0.22);
+  flex: 0 0 auto;
 }
 .panel h3 {
   margin: 0 0 10px;
@@ -973,14 +1056,14 @@ onUnmounted(() => {
 .opp-list {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 5px;
 }
 .opp-item {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 6px 8px;
-  border-radius: 10px;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 9px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.06);
   transition: all 0.2s;
@@ -1004,14 +1087,15 @@ onUnmounted(() => {
 }
 .opp-face {
   flex: 0 0 auto;
-  width: 34px;
-  height: 34px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   overflow: hidden;
   border: 2px solid rgba(216, 180, 106, 0.5);
   background: rgba(216, 180, 106, 0.15);
   display: grid;
   place-items: center;
+  font-size: 12px;
   font-weight: 700;
   color: #d8b46a;
 }
@@ -1095,6 +1179,143 @@ onUnmounted(() => {
 .equip-hint {
   margin-top: 8px;
   color: #6fc9a4;
+}
+
+/* 合成图鉴提示 */
+.combo-guide {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(111, 201, 164, 0.08);
+  border: 1px solid rgba(111, 201, 164, 0.25);
+}
+.combo-title {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: #6fc9a4;
+  font-weight: 700;
+}
+.combo-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin: 4px 0;
+  flex-wrap: wrap;
+}
+.combo-formula {
+  color: #e6e2d6;
+}
+.combo-arrow {
+  color: #d8b46a;
+  font-weight: 700;
+}
+.combo-result {
+  color: #f0b429;
+  font-weight: 700;
+}
+.combo-stat {
+  color: #8f98a6;
+  font-size: 11px;
+}
+
+/* 合成成功弹窗 */
+.combine-toast-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: grid;
+  place-items: center;
+  background: rgba(6, 8, 16, 0.55);
+  backdrop-filter: blur(3px);
+  pointer-events: none;
+}
+.combine-toast {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 22px 28px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(38, 32, 18, 0.98), rgba(20, 15, 6, 0.99));
+  border: 1px solid rgba(240, 180, 41, 0.55);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6), 0 0 40px rgba(240, 180, 41, 0.25);
+  animation: combinePop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  max-width: 90vw;
+}
+@keyframes combinePop {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: scale(1); }
+}
+.ct-icon {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 64px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  font-size: 30px;
+  font-weight: 900;
+  color: #1a1408;
+  background: linear-gradient(180deg, #e8c87a, #c09a4a);
+  border: 2px solid rgba(240, 180, 41, 0.6);
+  box-shadow: 0 0 20px rgba(240, 180, 41, 0.4);
+  overflow: hidden;
+}
+.ct-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.ct-body {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.ct-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: #f0b429;
+  letter-spacing: 1px;
+}
+.ct-stat {
+  font-size: 15px;
+  color: #6fc9a4;
+  font-weight: 700;
+}
+.ct-desc {
+  font-size: 13px;
+  color: #8f98a6;
+  max-width: 360px;
+  line-height: 1.5;
+}
+
+/* 佩戴成功提示 */
+.equip-toast {
+  position: fixed;
+  top: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 250;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 22px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(38, 32, 18, 0.98), rgba(20, 15, 6, 0.99));
+  border: 1px solid rgba(111, 201, 164, 0.5);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 0 20px rgba(111, 201, 164, 0.2);
+  color: #e6e2d6;
+  font-size: 14px;
+  animation: combinePop 0.3s ease;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.equip-toast b {
+  color: #6fc9a4;
+}
+.et-icon {
+  color: #d8b46a;
+  font-size: 18px;
 }
 
 /* 棋盘佩戴高亮 */
@@ -1222,23 +1443,29 @@ onUnmounted(() => {
 
 /* 商店 */
 .shop, .bench, .logs {
-  margin-top: 16px;
+  margin-top: 0;
 }
 .shop-title {
-  font-size: 14px;
+  font-size: 13px;
   color: #d8b46a;
   letter-spacing: 1px;
-  margin: 0 0 10px;
+  margin: 0 0 8px;
+}
+.mini-hint {
+  margin-left: 8px;
+  font-size: 11px;
+  color: #5a5f70;
+  letter-spacing: 0;
 }
 .shop-grid {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  gap: 10px;
+  gap: 8px;
 }
 .shop-slot {
   position: relative;
   aspect-ratio: 1;
-  border-radius: 12px;
+  border-radius: 10px;
   cursor: pointer;
   background: rgba(46, 35, 17, 0.7);
   border: 1px solid rgba(216, 180, 106, 0.18);
@@ -1277,11 +1504,11 @@ onUnmounted(() => {
 .bench-grid {
   display: grid;
   grid-template-columns: repeat(9, 1fr);
-  gap: 8px;
+  gap: 6px;
 }
 .bench-slot {
   aspect-ratio: 1;
-  border-radius: 10px;
+  border-radius: 8px;
   cursor: pointer;
   background: rgba(46, 35, 17, 0.7);
   border: 1px solid rgba(216, 180, 106, 0.18);
@@ -1292,7 +1519,7 @@ onUnmounted(() => {
   transform: translateY(-2px);
 }
 .bench-slot .unit {
-  border-radius: 8px;
+  border-radius: 6px;
 }
 .empty-slot {
   display: grid;
@@ -1307,9 +1534,9 @@ onUnmounted(() => {
 
 /* 日志 */
 .log-list {
-  max-height: 160px;
+  max-height: 96px;
   overflow-y: auto;
-  padding: 10px 14px;
+  padding: 8px 12px;
   border-radius: 10px;
   background: rgba(46, 35, 17, 0.5);
   border: 1px solid rgba(216, 180, 106, 0.14);
@@ -1317,7 +1544,7 @@ onUnmounted(() => {
 .log-line {
   font-size: 12px;
   color: #8f98a6;
-  margin: 3px 0;
+  margin: 2px 0;
 }
 
 /* 按钮 */
@@ -1606,17 +1833,24 @@ onUnmounted(() => {
 }
 
 @media (max-width: 860px) {
-  .main {
+  .game {
+    position: static;
+    inset: auto;
+    min-height: 100vh;
+    overflow-y: visible;
+  }
+  .cols {
     flex-direction: column;
   }
-  .side {
-    width: 100%;
-    flex-direction: row;
-    flex-wrap: wrap;
+  .col-left {
+    flex: 1 1 auto;
+    overflow: visible;
   }
-  .side .panel {
-    flex: 1;
-    min-width: 200px;
+  .col-right {
+    flex: 1 1 auto;
+    max-width: none;
+    min-width: 0;
+    overflow: visible;
   }
   .board-grid {
     grid-template-columns: repeat(3, 1fr);
