@@ -1112,10 +1112,11 @@ onUnmounted(() => {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  grid-auto-rows: minmax(72px, 1fr);
+  grid-template-columns: repeat(4, 88px);
+  grid-auto-rows: 88px;
   gap: 8px;
-  align-content: stretch;
+  justify-content: center;
+  align-content: start;
 }
 .cell {
   border-radius: 10px;
@@ -1592,6 +1593,25 @@ onUnmounted(() => {
   font-size: 11px;
   color: #f0b429;
   letter-spacing: 1px;
+}
+
+/* 上场英雄卡牌：固定为散件(44px)的两倍 = 88px */
+.board .cell .unit {
+  width: 88px;
+  height: 88px;
+  flex: 0 0 auto;
+}
+.board .cell .unit-face {
+  border-radius: 8px;
+}
+.board .cell .unit-first {
+  font-size: 20px;
+}
+.board .cell .unit-name {
+  font-size: 12px;
+}
+.board .cell .unit-star {
+  font-size: 10px;
 }
 .unit-name {
   font-size: 13px;

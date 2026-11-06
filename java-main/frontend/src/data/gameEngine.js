@@ -130,6 +130,27 @@ function applyItemStats(s, itemId) {
       case '石像鬼板甲': s.ap = (s.ap || 0) + 15; s.armor += 25; break
       case '大天使之杖': s.ap = (s.ap || 0) + 15; s.manaMax += 15; break
       case '剑士徽章': case '游侠徽章': case '法师徽章': break  // 转职徽章，无战斗属性
+      case '朔极之矛': s.atk += 15; s.manaMax += 15; break
+      case '基克的先驱': s.atk += 15; s.maxHp += 200; break
+      case '无尽之刃': s.atk += 15; s.critRate = (s.critRate || 0) + 0.1; break
+      case '斯塔缇克电刃': s.atkSpeed += 0.15; s.manaMax += 15; break
+      case '泰坦的坚决': s.atkSpeed += 0.15; s.armor += 25; break
+      case '卢安娜的飓风': s.atkSpeed += 0.15; s.mr += 25; break
+      case '兹若特传送门': s.atkSpeed += 0.15; s.maxHp += 200; break
+      case '最后的轻语': s.atkSpeed += 0.15; s.critRate = (s.critRate || 0) + 0.1; break
+      case '钢铁烈阳之匣': s.ap = (s.ap || 0) + 15; s.armor += 25; break
+      case '离子火花': s.ap = (s.ap || 0) + 15; s.mr += 25; break
+      case '珠光护手': s.ap = (s.ap || 0) + 15; s.critRate = (s.critRate || 0) + 0.1; break
+      case '圣盾使的誓约': s.manaMax += 15; s.armor += 25; break
+      case '能量圣杯': s.manaMax += 15; s.mr += 25; break
+      case '救赎': s.manaMax += 15; s.maxHp += 200; break
+      case '正义之手': s.manaMax += 15; s.critRate = (s.critRate || 0) + 0.1; break
+      case '日炎斗篷': s.armor += 25; s.maxHp += 200; break
+      case '静止法衣': s.armor += 25; s.critRate = (s.critRate || 0) + 0.1; break
+      case '灵风': s.mr += 25; s.maxHp += 200; break
+      case '水银': s.mr += 25; s.critRate = (s.critRate || 0) + 0.1; break
+      case '女妖之爪': s.maxHp += 200; s.critRate = (s.critRate || 0) + 0.1; break
+      case '枪手徽章': case '骑士徽章': case '秘术师徽章': case '斗士徽章': case '刺客徽章': case '金铲铲冠冕': break  // 徽章/冠冕，无战斗属性
     }
   }
 }

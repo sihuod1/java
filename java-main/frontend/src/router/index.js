@@ -5,6 +5,7 @@ import LandingView from '../views/LandingView.vue'
 import LoginView from '../views/LoginView.vue'
 import RegisterView from '../views/RegisterView.vue'
 import HomeView from '../views/HomeView.vue'
+import LobbyView from '../views/LobbyView.vue'
 import GameView from '../views/GameView.vue'
 import ProfileView from '../views/ProfileView.vue'
 import AdminLoginView from '../views/AdminLoginView.vue'
@@ -30,6 +31,12 @@ const routes = [
     name: 'home',
     component: HomeView,
     meta: { title: '主页', requiresAuth: true }
+  },
+  {
+    path: '/lobby',
+    name: 'lobby',
+    component: LobbyView,
+    meta: { title: '开黑大厅', requiresAuth: true }
   },
   {
     path: '/game',

@@ -139,7 +139,7 @@ function goProfile() {
 
 /* 进入自走棋对局 */
 function goGame() {
-  router.push({ name: 'game' })
+  router.push({ name: 'lobby' })
 }
 
 /* 进后台管理系统（图鉴数据管理）；未登录后台会先落到后台登录页 */

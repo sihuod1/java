@@ -44,6 +44,7 @@ public class ApiController {
     public Result<MeResult> me() {
         User user = userService.getById(UserContext.getUserId());
         MeResult data = new MeResult(
+                user.getId(),
                 user.getUsername(),
                 user.getNickName(),
                 user.getCreateTime(),
