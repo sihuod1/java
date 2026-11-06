@@ -146,6 +146,7 @@ function applyTraitBonus(s, bonus) {
 export function computeTraitBonuses(units) {
   const count = {}
   for (const u of units) {
+    if (!u) continue   // 跳过棋盘空位
     for (const t of u.champ.traits) {
       count[t] = (count[t] || 0) + 1
     }
@@ -185,9 +186,9 @@ function traitEffect(traitName, tier) {
 /* ---------- 战斗模拟 ---------- */
 /* 简化的自动战斗：单位互相对砍，按攻击速度结算，有技能释放 */
 export function simulateFight(attacker, defender) {
-  // 双方生成战斗实例
-  const aUnits = attacker.board.map(u => makeBattleUnit(u, computeTraitBonuses(attacker.board)))
-  const dUnits = defender.board.map(u => makeBattleUnit(u, computeTraitBonuses(defender.board)))
+  // 双方生成战斗实例（过滤棋盘空位）
+  const aUnits = attacker.board.filter(Boolean).map(u => makeBattleUnit(u, computeTraitBonuses(attacker.board)))
+  const dUnits = defender.board.filter(Boolean).map(u => makeBattleUnit(u, computeTraitBonuses(defender.board)))
   const aTotal = aUnits.length
   const dTotal = dUnits.length
   // 总战力估算：用于快速结算（保持可玩性，不做逐帧动画）
@@ -209,8 +210,8 @@ export function simulateFight(attacker, defender) {
     dUnits: dUnits.length,
     // 供动画展示的双方阵容明细（含属性 + 头像）
     roster: {
-      ally: aUnits.map(u => ({ name: u.name, cost: u.champId ? costOf(u.champId) : 1, star: u.star, hp: u.maxHp, atk: u.atk, avatar: u.avatar })),
-      enemy: dUnits.map(u => ({ name: u.name, cost: u.champId ? costOf(u.champId) : 1, star: u.star, hp: u.maxHp, atk: u.atk, avatar: u.avatar }))
+      ally: aUnits.map(u => ({ name: u.name, cost: u.champId ? costOf(u.champId) : 1, star: u.star, hp: u.maxHp, atk: u.atk, avatar: u.avatar, manaMax: u.manaMax, skillName: (u.skill && u.skill.name) || '' })),
+      enemy: dUnits.map(u => ({ name: u.name, cost: u.champId ? costOf(u.champId) : 1, star: u.star, hp: u.maxHp, atk: u.atk, avatar: u.avatar, manaMax: u.manaMax, skillName: (u.skill && u.skill.name) || '' }))
     },
     events
   }
@@ -221,12 +222,22 @@ function costOf(champId) {
   return c ? c.cost : 1
 }
 
-/* 依据战力胜负，编排一场真实的逐帧攻防事件序列（用于前端动画回放） */
+/* 依据战力胜负，编排一场真实的逐帧攻防事件序列（用于前端动画回放）
+ * 含法力系统：普攻积攒蓝条，叠满自动释放技能；
+ * 被动技能英雄（manaMax=0）每第 3 次攻击附带技能伤害 */
 function buildFightEvents(aUnits, dUnits, aWin) {
   const events = []
-  // 建立带实时血量的战斗单位（拷贝，避免污染原数据）
-  const aAlive = aUnits.map(u => ({ name: u.name, cost: u.champId ? costOf(u.champId) : 1, hp: u.maxHp, maxHp: u.maxHp, atk: u.atk }))
-  const dAlive = dUnits.map(u => ({ name: u.name, cost: u.champId ? costOf(u.champId) : 1, hp: u.maxHp, maxHp: u.maxHp, atk: u.atk }))
+  // 建立带实时血量/蓝量的战斗单位（拷贝，避免污染原数据）
+  const mk = (u) => ({
+    name: u.name, cost: u.champId ? costOf(u.champId) : 1,
+    hp: u.maxHp, maxHp: u.maxHp, atk: u.atk,
+    mana: Math.round((u.manaMax || 0) * 0.25),   // 开局自带 25% 蓝量
+    manaMax: u.manaMax || 0,
+    skillName: (u.skill && u.skill.name) || '',
+    atkCount: 0
+  })
+  const aAlive = aUnits.map(mk)
+  const dAlive = dUnits.map(mk)
 
   const aliveIdx = (list) => {
     const idx = []
@@ -243,16 +254,35 @@ function buildFightEvents(aUnits, dUnits, aWin) {
     const di = defIdxArr[Math.floor(Math.random() * defIdxArr.length)]
     const atk = attacking[ai]
     const def = defending[di]
-    const crit = Math.random() < 0.18
-    // 放大伤害，让战斗在合理事件数内结束（约 12~20 个事件）
-    const dmg = Math.max(1, Math.round(atk.atk * (1.6 + Math.random() * 1.2) * (crit ? 2.0 : 1)))
+    atk.atkCount++
+    let dmg, crit = false, skillName = ''
+
+    // 主动技能：蓝条叠满 → 本次攻击变成技能释放，伤害更高并清空蓝条
+    if (atk.manaMax > 0 && atk.skillName && atk.mana >= atk.manaMax) {
+      dmg = Math.max(1, Math.round(atk.atk * 2.8 * (0.9 + Math.random() * 0.3)))
+      skillName = atk.skillName
+      atk.mana = 0
+    } else if (atk.manaMax === 0 && atk.skillName && atk.atkCount % 3 === 0) {
+      // 被动技能（无蓝条）：每第 3 次攻击附带技能伤害
+      dmg = Math.max(1, Math.round(atk.atk * 2.2 * (0.9 + Math.random() * 0.3)))
+      skillName = atk.skillName
+    } else {
+      // 普通攻击：积攒蓝量
+      crit = Math.random() < 0.18
+      dmg = Math.max(1, Math.round(atk.atk * (1.6 + Math.random() * 1.2) * (crit ? 2.0 : 1)))
+      if (atk.manaMax > 0) {
+        atk.mana = Math.min(atk.manaMax, atk.mana + 14)
+      }
+    }
+
     def.hp -= dmg
     if (def.hp <= 0) def.hp = 0
     events.push({
       atkSide, defSide,
       atkIdx: ai, defIdx: di,
       atkName: atk.name, defName: def.name,
-      dmg, crit, kill: def.hp <= 0
+      dmg, crit, kill: def.hp <= 0,
+      skillName, manaAfter: atk.mana, manaMax: atk.manaMax
     })
     return true
   }
@@ -287,11 +317,13 @@ function buildFightEvents(aUnits, dUnits, aWin) {
     const wi = winnerAlive[Math.floor(Math.random() * winnerAlive.length)]
     const dmg = Math.max(1, loserList[li].hp)
     loserList[li].hp = 0
+    const winner = winnerList[wi]
     events.push({
       atkSide: winnerSide, defSide: loserSide,
       atkIdx: wi, defIdx: li,
-      atkName: winnerList[wi].name, defName: loserList[li].name,
-      dmg, crit: false, kill: true
+      atkName: winner.name, defName: loserList[li].name,
+      dmg, crit: false, kill: true,
+      skillName: '', manaAfter: winner.mana, manaMax: winner.manaMax
     })
   }
 
@@ -319,10 +351,11 @@ export class Game {
     this.currentEnemy = null // 本回合随机到的对手（战斗结算时记录）
     this.player.board.push(makeUnit(pick(CHAMPIONS).id, 1))
 
-    // 开局赠送一对可合成的散件，让玩家立即体验「合成成装」
-    // 暴风大剑 + 反曲之弓 → 巨人杀手（异名合成，直观演示合成机制）
-    this.player.baseItems.push({ id: '暴风大剑' }, { id: '反曲之弓' })
-    this.log('开局赠送散件「暴风大剑」「反曲之弓」，点击背包中的两件散件即可合成「巨人杀手」')
+    // 开局随机赠送一对可合成的散件，让玩家立即体验「合成成装」
+    // 从成装配方向随机抽一条，再反推两个散件，保证这两个散件一定能合成
+    const recipe = pick(FULL_ITEMS)
+    this.player.baseItems.push({ id: recipe.a }, { id: recipe.b })
+    this.log(`开局赠送散件「${recipe.a}」「${recipe.b}」，点击背包中的两件散件即可合成「${recipe.name}」`)
   }
 
   /* 开始新回合：发利息、刷商店 */
@@ -378,32 +411,47 @@ export class Game {
 
   addToBench(champId) {
     const p = this.player
-    // 先把新买的一星单位放进去
+    // 先把新买的一星单位放进去，再尝试合成升星
     p.bench.push(makeUnit(champId, 1))
-    // 反复合成：同 id 且同星级的单位满 3 个就升 1 星
+    this.tryMergeChamp(champId)
+  }
+
+  /* 合成升星：同 id 同星级满 3 个 → 升 1 星
+   * 金铲铲规则：备战席和棋盘上的单位一起计数；
+   * 升星结果优先保留在棋盘上（原地升星），多余的从备战席移除 */
+  tryMergeChamp(champId) {
+    const p = this.player
     let merged = true
     while (merged) {
       merged = false
       for (let star = 1; star < 3; star++) {
-        // 找该 id 该星级的所有单位
-        const group = p.bench.filter(u => u.champ.id === champId && u.star === star)
-        if (group.length >= 3) {
-          // 3 个同星 → 1 个更高一星（升到 star+1）
-          const base = group[0]
-          base.star = star + 1
-          // 移除这 3 个同星中的另外 2 个
-          let removed = 0
-          p.bench = p.bench.filter(u => {
-            if (u.champ.id === champId && u.star === star && removed < 2) {
-              removed++
-              return false
-            }
-            return true
-          })
-          this.log(`合成 ${base.champ.name} ${base.star} 星！（3 个 ${star} 星）`)
-          merged = true
-          break
+        // 收集备战席 + 棋盘上（非空）的所有同 id 同星单位
+        const cands = [
+          ...p.bench.map(u => ({ u, from: 'bench' })),
+          ...p.board.map((u, i) => u ? ({ u, from: 'board', boardIndex: i }) : null).filter(Boolean)
+        ].filter(x => x.u.champ.id === champId && x.u.star === star)
+        if (cands.length < 3) continue
+        // 保留优先级：场上单位（原地升星）> 备战席第一个
+        const base = cands.find(x => x.from === 'board') || cands[0]
+        base.u.star = star + 1
+        // 移除另外两个（candidates 备战席在前，天然优先移备战席，减少棋盘空位）
+        const remove = cands.filter(x => x !== base).slice(0, 2)
+        // 被移除单位身上的装备退回背包
+        for (const r of remove) {
+          if (r.u.items && r.u.items.length) {
+            p.baseItems.push(...r.u.items.map(id => ({ id })))
+          }
         }
+        for (const r of remove) {
+          if (r.from === 'bench') {
+            p.bench.splice(p.bench.indexOf(r.u), 1)
+          } else {
+            p.board[r.boardIndex] = null
+          }
+        }
+        this.log(`合成 ${base.u.champ.name} ${base.u.star} 星！`)
+        merged = true
+        break
       }
     }
   }
@@ -423,7 +471,10 @@ export class Game {
     const p = this.player
     const u = p.bench[benchIndex]
     if (!u) return
-    if (p.board.length >= p.level) { this.log('人口已满，先升级！'); return }
+    // 人口按「场上非空单位数」计算：下阵后的空位(null)不算人口
+    const used = p.board.filter(x => x).length
+    if (used >= p.level) { this.log('人口已满，先升级！'); return }
+    if (p.board[boardIndex]) { this.log('该位置已有单位'); return }
     p.board[boardIndex] = u
     p.bench.splice(benchIndex, 1)
   }
@@ -473,9 +524,15 @@ export class Game {
     const b = p.baseItems[i2]
     if (!a || !b) return null
     if (i1 === i2) { this.log('请选择两个不同的散件'); return null }
+    // 成装不能再参与合成（成装只用于佩戴，取下时自动拆回两件散件）
+    const isBase = it => BASE_ITEMS.some(x => x.id === it.id)
+    if (!isBase(a) || !isBase(b)) {
+      this.log('成装无法再参与合成，可直接佩戴到英雄身上')
+      return null
+    }
     // 两个散件（名字）合成
     const fi = this.combineItems(a.id, b.id)
-    if (!fi) { this.log(`「${a.name}」和「${b.name}」无法合成`); return null }
+    if (!fi) { this.log(`「${a.name || a.id}」和「${b.name || b.id}」没有合成配方`); return null }
     // 从背包移除两个散件（先删索引大的，避免错位）
     const hi = Math.max(i1, i2)
     const lo = Math.min(i1, i2)

@@ -1,17 +1,17 @@
 /*
  Navicat Premium Dump SQL
 
- Source Server         : test
+ Source Server         : localhost_3306_1
  Source Server Type    : MySQL
- Source Server Version : 80039 (8.0.39)
+ Source Server Version : 80046 (8.0.46)
  Source Host           : localhost:3306
  Source Schema         : springboottest
 
  Target Server Type    : MySQL
- Target Server Version : 80039 (8.0.39)
+ Target Server Version : 80046 (8.0.46)
  File Encoding         : 65001
 
- Date: 05/11/2026 15:17:44
+ Date: 06/11/2026 09:58:31
 */
 
 SET NAMES utf8mb4;

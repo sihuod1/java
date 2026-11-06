@@ -2,9 +2,9 @@
 import { reactive, ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  CHAMPIONS, TRAITS, BASE_ITEMS, FULL_ITEMS, COST_COLOR, COST_LABEL
+  CHAMPIONS, TRAITS, BASE_ITEMS, FULL_ITEMS, COST_COLOR, COST_LABEL, SHOP_ODDS
 } from '../data/gameData'
-import { Game, computeTraitBonuses } from '../data/gameEngine'
+import { Game } from '../data/gameEngine'
 import { getSavedUser } from '../utils/auth'
 import userAvatar from '../assets/user-avatar.jpeg'
 
@@ -32,6 +32,11 @@ let battleTimers = []             // 清理用定时器
 
 /* 战斗单位实时血量映射（side:idx -> curHp），用于血条 */
 const battleHp = reactive({ ally: {}, enemy: {} })
+/* 战斗单位实时蓝量映射（side:idx -> {mana, max}），用于蓝条 */
+const battleMana = reactive({ ally: {}, enemy: {} })
+/* 技能释放横幅（{ unitName, skillName }） */
+const battleSkillTip = ref(null)
+let skillTipTimer = null
 /* 当前攻击方/受击方索引（冲撞高亮） */
 const battleAtk = reactive({ side: '', idx: -1 })
 const battleDef = reactive({ side: '', idx: -1 })
@@ -154,13 +159,23 @@ function playBattle(roster, events, won, r) {
     defName: '',
     dmg: 0,
     crit: false,
-    kill: false
+    kill: false,
+    skillCast: false,
+    skillName: ''
   }
-  // 重置血条映射
+  // 重置血条/蓝条映射
   battleHp.ally = {}
   battleHp.enemy = {}
   ally.forEach((u, i) => { battleHp.ally[i] = u.curHp })
   enemy.forEach((u, i) => { battleHp.enemy[i] = u.curHp })
+  battleMana.ally = {}
+  battleMana.enemy = {}
+  const initMana = (list, side) => list.forEach((u, i) => {
+    const max = u.manaMax || 0
+    battleMana[side][i] = { mana: Math.round(max * 0.25), max }
+  })
+  initMana(ally, 'ally')
+  initMana(enemy, 'enemy')
 
   battleActive.value = true
   battleEventIdx.value = 0
@@ -194,6 +209,8 @@ function playNextEvent() {
   b.dmg = ev.dmg
   b.crit = !!ev.crit
   b.kill = ev.kill
+  b.skillCast = !!ev.skillName
+  b.skillName = ev.skillName || ''
   battleAtk.side = ev.atkSide
   battleAtk.idx = ev.atkIdx
   battleDef.side = ev.defSide
@@ -206,14 +223,24 @@ function playNextEvent() {
     unit.curHp = Math.max(0, unit.curHp - ev.dmg)
     battleHp[sideKey][ev.defIdx] = unit.curHp
   }
+  // 更新攻击方蓝条
+  if (ev.manaMax > 0 && battleMana[ev.atkSide] && battleMana[ev.atkSide][ev.atkIdx]) {
+    battleMana[ev.atkSide][ev.atkIdx] = { mana: ev.manaAfter, max: ev.manaMax }
+  }
   if (ev.kill) {
     if (ev.defSide === 'enemy') deadUnits.enemy.add(ev.defIdx)
     else deadUnits.ally.add(ev.defIdx)
   }
+  // 技能释放横幅
+  if (ev.skillName) {
+    battleSkillTip.value = { unitName: ev.atkName, skillName: ev.skillName }
+    if (skillTipTimer) clearTimeout(skillTipTimer)
+    skillTipTimer = setTimeout(() => { battleSkillTip.value = null }, 700)
+  }
   battleEventIdx.value++
 
-  // 每个事件约 300ms，之后播下一个
-  battleTimers.push(setTimeout(playNextEvent, 300))
+  // 每个事件约 300ms（技能释放停留更久），之后播下一个
+  battleTimers.push(setTimeout(playNextEvent, ev.skillName ? 620 : 300))
 }
 
 function clearBattle() {
@@ -221,11 +248,58 @@ function clearBattle() {
   battleTimers = []
 }
 
-/* 羁绊计算显示 */
-const activeTraits = computed(() => {
+/* 场上羁绊面板：每个上阵英雄的羁绊都会显示（含未激活的灰色计数） */
+const traitPanel = computed(() => {
   if (!game.value) return []
   const units = game.value.player.board.filter(u => u)
-  return computeTraitBonuses(units)
+  const count = {}
+  for (const u of units) {
+    for (const t of u.champ.traits) {
+      count[t] = (count[t] || 0) + 1
+    }
+  }
+  return Object.entries(count).map(([name, n]) => {
+    const trait = TRAITS[name]
+    if (!trait) return { name, count: n, countText: String(n), active: false, desc: '' }
+    const tiers = trait.tiers
+    // 当前已激活的最高档
+    let active = null
+    for (const tier of tiers) {
+      if (n >= tier.n) active = tier
+    }
+    // 下一档 / 最高档（用于显示 人数/目标）
+    const nextTier = tiers.find(tier => tier.n > n)
+    const maxTier = tiers[tiers.length - 1].n
+    const countText = nextTier ? `${n}/${nextTier.n}` : `${n}/${maxTier}`
+    return {
+      name,
+      count: n,
+      countText,
+      active: !!active,
+      desc: active ? active.desc : (nextTier ? nextTier.desc : tiers[0].desc)
+    }
+  }).sort((a, b) => Number(b.active) - Number(a.active) || b.count - a.count)
+})
+
+/* 商店概率面板：当前等级 + 下一等级各费用出现率 */
+const shopOddsPanel = computed(() => {
+  if (!game.value) return []
+  const lvl = game.value.player.level
+  const cur = SHOP_ODDS[lvl] || SHOP_ODDS[9]
+  const nextLvl = Math.min(lvl + 1, 9)
+  const next = SHOP_ODDS[nextLvl]
+  return [1, 2, 3, 4, 5].map((c, i) => ({
+    cost: c,
+    cur: cur[i],
+    next: next[i],
+    up: next[i] > cur[i]
+  }))
+})
+const oddsCurLabel = computed(() => game.value ? `${game.value.player.level}级` : '1级')
+const oddsNextLabel = computed(() => {
+  if (!game.value) return '2级'
+  const n = Math.min(game.value.player.level + 1, 9)
+  return n === game.value.player.level ? '满级' : `${n}级`
 })
 
 /* 棋盘槽位：人口数 */
@@ -255,6 +329,13 @@ function hpPct(side, i) {
   return Math.max(0, Math.round((u.curHp / u.maxHp) * 100))
 }
 
+/* 战斗动画：计算蓝条百分比 */
+function manaPct(side, i) {
+  const m = battleMana[side] && battleMana[side][i]
+  if (!m || !m.max) return 0
+  return Math.min(100, Math.round((m.mana / m.max) * 100))
+}
+
 function unitCost(u) {
   return u.champ.cost
 }
@@ -282,6 +363,14 @@ const selectedItemIdx = ref(-1)  // 当前选中要操作的装备索引（-1 �
 
 /* 合成成功弹窗 */
 const combineToast = ref(null)   // { fullName, stat, desc, img }
+/* 合成/操作失败提示 */
+const combineFailTip = ref('')
+let combineFailTimer = null
+function showFailTip(msg) {
+  combineFailTip.value = msg
+  if (combineFailTimer) clearTimeout(combineFailTimer)
+  combineFailTimer = setTimeout(() => { combineFailTip.value = '' }, 2400)
+}
 /* 佩戴成功提示 */
 const equipToast = ref(null)     // { unitName, itemName, stat }
 
@@ -346,11 +435,18 @@ function selectItem(idx) {
   const a = player.baseItems[selectedItemIdx.value]
   const b = player.baseItems[idx]
   if (a && b) {
-    const fi = game.value.combineTwoInBag(selectedItemIdx.value, idx)
-    if (fi) {
-      // 合成成功：弹窗展示成装结果
-      combineToast.value = { fullName: fi.name, stat: fi.stat, desc: fi.desc, img: fi.img }
-      setTimeout(() => { combineToast.value = null }, 2600)
+    // 成装不能参与合成（成装只用于佩戴）
+    if (!isBaseItem(a) || !isBaseItem(b)) {
+      showFailTip('成装无法再合成，点棋盘上的英雄可直接佩戴')
+    } else {
+      const fi = game.value.combineTwoInBag(selectedItemIdx.value, idx)
+      if (fi) {
+        // 合成成功：弹窗展示成装结果
+        combineToast.value = { fullName: fi.name, stat: fi.stat, desc: fi.desc, img: fi.img }
+        setTimeout(() => { combineToast.value = null }, 2600)
+      } else {
+        showFailTip(`「${itemById(a.id).name}」+「${itemById(b.id).name}」没有合成配方`)
+      }
     }
     selectedItemIdx.value = -1
     syncPlayer()
@@ -412,15 +508,17 @@ onUnmounted(() => {
                 <span class="b-star">{{ '★'.repeat(u.star) }}</span>
                 <span class="b-name">{{ u.name }}</span>
                 <span class="b-hpbar"><i :style="{ width: hpPct('enemy', i) + '%' }"></i></span>
+                <span v-if="battleMana.enemy[i] && battleMana.enemy[i].max" class="b-manabar" :class="{ full: manaPct('enemy', i) >= 100 }"><i :style="{ width: manaPct('enemy', i) + '%' }"></i></span>
               </div>
-              <span v-if="battleDef.side === 'enemy' && battleDef.idx === i" class="b-dmg-float" :class="{ crit: battle.crit, kill: battle.kill }">-{{ battle.dmg }}</span>
+              <span v-if="battleDef.side === 'enemy' && battleDef.idx === i" class="b-dmg-float" :class="{ crit: battle.crit, kill: battle.kill, skill: battle.skillCast }">-{{ battle.dmg }}</span>
             </div>
           </div>
 
           <!-- 中场线 + 中央信息 -->
           <div class="battle-mid">
             <template v-if="battlePhase === 'fight'">
-              <span class="b-action">{{ battle.atkName }} → {{ battle.defName }}</span>
+              <span v-if="battleSkillTip" class="b-action skill">✨ {{ battleSkillTip.unitName }} 释放【{{ battleSkillTip.skillName }}】！</span>
+              <span v-else class="b-action">{{ battle.atkName }} → {{ battle.defName }}</span>
             </template>
             <template v-else-if="battlePhase === 'intro'">
               <span class="b-msg">战斗开始！</span>
@@ -448,8 +546,9 @@ onUnmounted(() => {
                 <span class="b-star">{{ '★'.repeat(u.star) }}</span>
                 <span class="b-name">{{ u.name }}</span>
                 <span class="b-hpbar"><i :style="{ width: hpPct('ally', i) + '%' }"></i></span>
+                <span v-if="battleMana.ally[i] && battleMana.ally[i].max" class="b-manabar" :class="{ full: manaPct('ally', i) >= 100 }"><i :style="{ width: manaPct('ally', i) + '%' }"></i></span>
               </div>
-              <span v-if="battleDef.side === 'ally' && battleDef.idx === i" class="b-dmg-float" :class="{ crit: battle.crit, kill: battle.kill }">-{{ battle.dmg }}</span>
+              <span v-if="battleDef.side === 'ally' && battleDef.idx === i" class="b-dmg-float" :class="{ crit: battle.crit, kill: battle.kill, skill: battle.skillCast }">-{{ battle.dmg }}</span>
             </div>
           </div>
         </div>
@@ -492,6 +591,12 @@ onUnmounted(() => {
     <div v-if="equipToast" class="equip-toast">
       <span class="et-icon">⚔</span>
       <span>为 <b>{{ equipToast.unitName }}</b> 佩戴「{{ equipToast.itemName }}」{{ equipToast.stat ? '（' + equipToast.stat + '）' : '' }}</span>
+    </div>
+
+    <!-- 操作失败提示 -->
+    <div v-if="combineFailTip" class="equip-toast fail">
+      <span class="et-icon">⚠</span>
+      <span>{{ combineFailTip }}</span>
     </div>
 
     <!-- 符文选择遮罩 -->
@@ -656,9 +761,15 @@ onUnmounted(() => {
             </div>
           </div>
           <p v-else class="muted">暂无装备，野怪回合获胜可掉落散件</p>
-          <p v-if="selectedItemIdx >= 0" class="muted equip-hint">
-            已选中「{{ itemById(player.baseItems[selectedItemIdx].id).name }}」：
-            再点另一个散件合成成装，或点棋盘上的英雄佩戴
+          <p v-if="selectedItemIdx >= 0 && player.baseItems[selectedItemIdx]" class="muted equip-hint">
+            <template v-if="isBaseItem(player.baseItems[selectedItemIdx])">
+              已选中「{{ itemById(player.baseItems[selectedItemIdx].id).name }}」：
+              再点另一个散件合成成装，或点棋盘上的英雄佩戴
+            </template>
+            <template v-else>
+              已选中成装「{{ itemById(player.baseItems[selectedItemIdx].id).name }}」：
+              点棋盘上的英雄即可佩戴（成装无法再合成）
+            </template>
           </p>
           <!-- 合成图鉴：选中散件时显示可合成的成装 -->
           <div v-if="selectedCombos.length" class="combo-guide">
@@ -672,17 +783,40 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- 激活羁绊 -->
+        <!-- 场上羁绊 -->
         <div class="panel">
-          <h3>激活羁绊</h3>
-          <div v-if="activeTraits.length" class="trait-list">
-            <div v-for="t in activeTraits" :key="t.trait" class="trait-item">
-              <span class="trait-name">{{ t.trait }}</span>
-              <span class="trait-tier">{{ t.tier }}人</span>
+          <h3>场上羁绊</h3>
+          <div v-if="traitPanel.length" class="trait-list">
+            <div
+              v-for="t in traitPanel"
+              :key="t.name"
+              class="trait-item"
+              :class="t.active ? 'is-active' : 'is-inactive'"
+            >
+              <span class="trait-name">{{ t.name }}</span>
+              <span class="trait-tier">{{ t.countText }}</span>
               <span class="trait-desc">{{ t.desc }}</span>
             </div>
           </div>
-          <p v-else class="muted">暂无激活羁绊</p>
+          <p v-else class="muted">上阵英雄后显示羁绊</p>
+        </div>
+
+        <!-- 商店概率 -->
+        <div class="panel">
+          <h3>商店概率</h3>
+          <div class="odds-table">
+            <div class="odds-row odds-head">
+              <span class="odds-cost">费用</span>
+              <span>{{ oddsCurLabel }}</span>
+              <span>{{ oddsNextLabel }}</span>
+            </div>
+            <div v-for="row in shopOddsPanel" :key="row.cost" class="odds-row">
+              <span class="odds-cost" :style="{ color: COST_COLOR[row.cost] }">{{ COST_LABEL[row.cost] }}</span>
+              <span>{{ row.cur }}%</span>
+              <span :class="{ 'odds-up': row.up }">{{ row.next }}%{{ row.up ? ' ↑' : '' }}</span>
+            </div>
+          </div>
+          <p class="muted odds-note">人口升级后，高费英雄出现概率提升</p>
         </div>
 
         <!-- 已选符文 -->
@@ -954,7 +1088,12 @@ onUnmounted(() => {
 }
 .t-right .lvl {
   font-weight: 700;
-  color: #6fc9a4;
+  font-size: 20px;
+  color: #f0c877;
+  padding: 4px 14px;
+  border-radius: 10px;
+  background: rgba(216, 180, 106, 0.15);
+  border: 1px solid rgba(216, 180, 106, 0.35);
 }
 
 /* 主区（旧版 .main 已改为 .cols 左右两栏） */
@@ -1019,6 +1158,25 @@ onUnmounted(() => {
   gap: 8px;
   font-size: 12.5px;
 }
+/* 已激活：金色高亮 */
+.trait-item.is-active .trait-name {
+  color: #d8b46a;
+}
+.trait-item.is-active .trait-tier {
+  background: rgba(216, 180, 106, 0.18);
+  color: #f0c877;
+}
+/* 未激活：灰色弱化 */
+.trait-item.is-inactive {
+  opacity: 0.55;
+}
+.trait-item.is-inactive .trait-name {
+  color: #8f98a6;
+}
+.trait-item.is-inactive .trait-tier {
+  background: rgba(143, 152, 166, 0.15);
+  color: #8f98a6;
+}
 .trait-name {
   font-weight: 700;
   color: #6fc9a4;
@@ -1037,6 +1195,37 @@ onUnmounted(() => {
   color: #8f98a6;
   font-size: 12.5px;
   margin: 0;
+}
+/* 商店概率表 */
+.odds-table {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.odds-row {
+  display: grid;
+  grid-template-columns: 52px 1fr 1fr;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #cfd6df;
+}
+.odds-row.odds-head {
+  color: #8f98a6;
+  font-size: 11px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid rgba(216, 180, 106, 0.18);
+}
+.odds-cost {
+  font-weight: 700;
+}
+.odds-up {
+  color: #6fc9a4;
+  font-weight: 700;
+}
+.odds-note {
+  margin-top: 8px;
+  font-size: 11px;
 }
 .rune-owned {
   display: flex;
@@ -1312,6 +1501,13 @@ onUnmounted(() => {
 }
 .equip-toast b {
   color: #6fc9a4;
+}
+.equip-toast.fail {
+  border-color: rgba(255, 143, 143, 0.5);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 0 20px rgba(255, 143, 143, 0.2);
+}
+.equip-toast.fail .et-icon {
+  color: #ff8f8f;
 }
 .et-icon {
   color: #d8b46a;
@@ -1763,6 +1959,28 @@ onUnmounted(() => {
   background: linear-gradient(90deg, #e74c3c, #ff8f8f);
   transition: width 0.25s ease;
 }
+/* 蓝条：法力积攒，叠满变亮提示可开大 */
+.b-manabar {
+  position: relative;
+  z-index: 2;
+  width: 80%;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  margin-bottom: 3px;
+}
+.b-manabar i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #3b7bd9, #6fc3ff);
+  transition: width 0.25s ease;
+}
+.b-manabar.full i {
+  background: linear-gradient(90deg, #4aa3ff, #a8e0ff);
+  box-shadow: 0 0 6px rgba(111, 195, 255, 0.9);
+}
 
 /* 掉血飘字 */
 .b-dmg-float {
@@ -1786,6 +2004,12 @@ onUnmounted(() => {
 .b-dmg-float.kill {
   color: #ff4d4d;
 }
+/* 技能伤害飘字：蓝色系、更大更炫 */
+.b-dmg-float.skill {
+  color: #6fc3ff;
+  font-size: 40px;
+  text-shadow: 0 0 16px rgba(111, 195, 255, 0.95), 0 0 30px rgba(74, 163, 255, 0.6);
+}
 @keyframes dmgFloat {
   0% { opacity: 0; transform: translate(-50%, 0) scale(0.5); }
   30% { opacity: 1; transform: translate(-50%, -10px) scale(1.15); }
@@ -1804,6 +2028,18 @@ onUnmounted(() => {
 .b-action {
   font-size: 17px;
   color: #d8b46a;
+}
+.b-action.skill {
+  font-size: 19px;
+  font-weight: 700;
+  color: #6fc3ff;
+  text-shadow: 0 0 10px rgba(111, 195, 255, 0.7);
+  animation: skillPop 0.6s ease;
+}
+@keyframes skillPop {
+  0% { opacity: 0; transform: scale(0.7); }
+  40% { opacity: 1; transform: scale(1.1); }
+  100% { opacity: 1; transform: scale(1); }
 }
 .b-msg {
   font-size: 32px;

@@ -184,7 +184,8 @@ export function interestOf(gold) {
 }
 
 /* ---------- 星级系数 ---------- */
-export const STAR_MULT = { 1: 1, 2: 1.8, 3: 3.24 }
+/* 2 星 = 1 星的 2 倍，3 星 = 1 星的 4.5 倍（四~五倍区间） */
+export const STAR_MULT = { 1: 1, 2: 2, 3: 4.5 }
 
 /* ---------- 费用颜色 ---------- */
 export const COST_COLOR = { 1: '#9aa4af', 2: '#2ecc71', 3: '#4a90d9', 4: '#c99ae0', 5: '#f0b429' }
